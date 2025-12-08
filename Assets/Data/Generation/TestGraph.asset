@@ -1,0 +1,50 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d9559d3050034de58ed4a513445a679, type: 3}
+  m_Name: TestGraph
+  m_EditorClassIdentifier: 
+  nodes:
+  - id: 80795faeef7345e4ae764e5972ddf871
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 53.676865, y: -97.44107}
+  - id: 79863ae15ed44cefb7337dc244487fe9
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 260.52777, y: -309.49026}
+  - id: 0e5a7ebe832b41a6a56cff1031a222de
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 311.2975, y: -20.777508}
+  - id: 91ca6cf64cc84fb4a7dc681fcc98720a
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: -6.8155036, y: 178.65265}
+  edges:
+  - fromNodeId: 79863ae15ed44cefb7337dc244487fe9
+    toNodeId: 80795faeef7345e4ae764e5972ddf871
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 79863ae15ed44cefb7337dc244487fe9
+    toNodeId: 0e5a7ebe832b41a6a56cff1031a222de
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 91ca6cf64cc84fb4a7dc681fcc98720a
+    toNodeId: 0e5a7ebe832b41a6a56cff1031a222de
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 91ca6cf64cc84fb4a7dc681fcc98720a
+    toNodeId: 80795faeef7345e4ae764e5972ddf871
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+  defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

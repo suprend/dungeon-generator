@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c0a35adf77d6f418493cf742b672f525, type: 3}
+  m_Name: BaseConnection
+  m_EditorClassIdentifier: 
+  prefabs:
+  - {fileID: 6881860542125881072, guid: 5b5d90dd7284a47ed9c73bc1e07fc6ee, type: 3}
+  - {fileID: 6881860542125881072, guid: c5fc556f1fcba4001af07dc5f10c2e82, type: 3}
+  - {fileID: 6881860542125881072, guid: ff4cca924a58e4a2a9b0197884942c52, type: 3}
+  - {fileID: 6881860542125881072, guid: 4aa7bcb949bb94b85b6de91794db4f0f, type: 3}
+  - {fileID: 6881860542125881072, guid: da2ab0381fd5e4b03804a7e16717926b, type: 3}
+  - {fileID: 6881860542125881072, guid: 69237d0054f974686be08ced3e82f240, type: 3}
+  - {fileID: 6881860542125881072, guid: 4bd3260009a8145258645eb94c39ee80, type: 3}
+  defaultWidth: 1
+  notes: 

@@ -25,4 +25,16 @@ public static class DoorSideExtensions
             _ => throw new ArgumentOutOfRangeException(nameof(side), side, "Unexpected door side value.")
         };
     }
+
+    public static Vector2Int Forward(this DoorSide side)
+    {
+        return side switch
+        {
+            DoorSide.North => new Vector2Int(0, 1),
+            DoorSide.South => new Vector2Int(0, -1),
+            DoorSide.East => new Vector2Int(1, 0),
+            DoorSide.West => new Vector2Int(-1, 0),
+            _ => throw new ArgumentOutOfRangeException(nameof(side), side, "Unexpected door side value.")
+        };
+    }
 }

@@ -14,6 +14,8 @@ public class MapGraphLevelSolver
     private readonly List<MapGraphFaceBuilder.Face> orderedFaces = new();
     private readonly AssignmentState state = new();
     private readonly System.Random rng = new();
+    private ShapeLibrary shapeLibrary;
+    private ConfigurationSpaceLibrary configSpaceLibrary;
 
     public MapGraphLevelSolver(MapGraphAsset graphAsset)
     {
@@ -62,16 +64,16 @@ public class MapGraphLevelSolver
     /// <summary>
     /// Solves and immediately places prefabs with full backtracking. Result is stamped into provided tilemaps.
     /// </summary>
-    public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, out string error)
+    public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, out string error, float maxDurationSeconds = 5f, bool destroyPlacedInstances = true)
     {
-        return TrySolveAndPlace(targetGrid, floorMap, wallMap, clearMaps, randomSeed, verboseLogs, null, out error);
+        return TrySolveAndPlace(targetGrid, floorMap, wallMap, clearMaps, randomSeed, verboseLogs, null, out error, maxDurationSeconds, destroyPlacedInstances);
     }
 
     /// <summary>
     /// Solves and immediately places prefabs with full backtracking. Result is stamped into provided tilemaps.
     /// Allows overriding the start room cell (e.g., from MapGraphBuilder transform).
     /// </summary>
-    public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, Vector3Int? startCell, out string error)
+    public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, Vector3Int? startCell, out string error, float maxDurationSeconds = 5f, bool destroyPlacedInstances = true)
     {
         error = null;
         if (targetGrid == null || floorMap == null)
@@ -80,6 +82,10 @@ public class MapGraphLevelSolver
             return false;
         }
 
+        var stamp = new TileStampService(targetGrid, floorMap, wallMap);
+        if (!PrecomputeGeometry(stamp, out error))
+            return false;
+
         if (!TrySolve(out var nodeAssign, out var edgeAssign, out error))
             return false;
 
@@ -87,11 +93,10 @@ public class MapGraphLevelSolver
             return false;
 
         var ordered = faces.OrderBy(f => f.Nodes.Count).ToList();
-        var stamp = new TileStampService(targetGrid, floorMap, wallMap);
         var rngLocal = randomSeed != 0 ? new System.Random(randomSeed) : new System.Random(UnityEngine.Random.Range(int.MinValue, int.MaxValue));
 
         var solveStartTime = Time.realtimeSinceStartup;
-        var placer = new PlacementState(stamp, rngLocal, nodeAssign, edgeAssign, verboseLogs, startCell, solveStartTime, 5f);
+        var placer = new PlacementState(stamp, rngLocal, nodeAssign, edgeAssign, verboseLogs, startCell, solveStartTime, maxDurationSeconds, shapeLibrary, configSpaceLibrary);
         if (clearMaps)
             stamp.ClearMaps();
 
@@ -107,7 +112,9 @@ public class MapGraphLevelSolver
             return false;
         }
 
-        placer.StampAll();
+        placer.StampAll(disableRenderers: !destroyPlacedInstances);
+        if (destroyPlacedInstances)
+            placer.DestroyPlacedInstances();
         if (verboseLogs)
         {
             var duration = Time.realtimeSinceStartup - solveStartTime;
@@ -123,6 +130,65 @@ public class MapGraphLevelSolver
 
         var face = orderedFaces[faceIndex];
         return TryAssignNodeInFace(faceIndex, 0);
+    }
+
+    /// <summary>
+    /// Precomputes shapes and configuration spaces for all prefabs referenced by the graph asset.
+    /// </summary>
+    public bool PrecomputeGeometry(TileStampService stamp, out string error)
+    {
+        error = null;
+        if (graphAsset == null)
+        {
+            error = "Graph asset is null.";
+            return false;
+        }
+
+        shapeLibrary = new ShapeLibrary(stamp);
+        configSpaceLibrary = new ConfigurationSpaceLibrary(shapeLibrary);
+
+        var prefabs = new HashSet<GameObject>();
+        // Collect room prefabs
+        foreach (var node in graphAsset.Nodes)
+        {
+            if (node?.roomType?.prefabs == null) continue;
+            foreach (var prefab in node.roomType.prefabs)
+                if (prefab != null) prefabs.Add(prefab);
+        }
+
+        // Default room type prefabs
+        if (graphAsset.DefaultRoomType?.prefabs != null)
+            foreach (var prefab in graphAsset.DefaultRoomType.prefabs)
+                if (prefab != null) prefabs.Add(prefab);
+
+        // Collect connector prefabs
+        foreach (var edge in graphAsset.Edges)
+        {
+            var conn = edge?.connectionType ?? graphAsset.DefaultConnectionType;
+            if (conn?.prefabs == null) continue;
+            foreach (var prefab in conn.prefabs)
+                if (prefab != null) prefabs.Add(prefab);
+        }
+
+        // Build shapes
+        foreach (var prefab in prefabs)
+        {
+            if (!shapeLibrary.TryGetShape(prefab, out _, out error))
+                return false;
+        }
+
+        // Build configuration spaces for all ordered pairs
+        var prefabList = prefabs.ToList();
+        for (int i = 0; i < prefabList.Count; i++)
+        {
+            for (int j = 0; j < prefabList.Count; j++)
+            {
+                if (!configSpaceLibrary.TryGetSpace(prefabList[i], prefabList[j], out _, out error))
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private bool TryAssignNodeInFace(int faceIndex, int nodeIndex)
@@ -326,11 +392,18 @@ public class MapGraphLevelSolver
         private readonly HashSet<Vector3Int> occupiedWall = new();
         private readonly HashSet<DoorSocket> usedSockets = new();
         private readonly Dictionary<GameObject, GeometryCache> geometryCache = new();
-        private readonly Dictionary<(DoorSide side, int width), List<GameObject>> connectorPrefabCache = new();
-        private readonly Dictionary<(DoorSide side, int width), List<GameObject>> roomPrefabCache = new();
+        private readonly Dictionary<GameObject, ModuleBlueprint> blueprintCache = new();
+        private readonly Dictionary<(ConnectionTypeAsset conn, DoorSide side, int width), List<GameObject>> connectorPrefabCache = new();
+        private readonly Dictionary<(RoomTypeAsset room, DoorSide side, int width), List<GameObject>> roomPrefabCache = new();
         private readonly HashSet<(string,string)> placedEdges = new();
 
-        public PlacementState(TileStampService stamp, System.Random rng, IReadOnlyDictionary<string, RoomTypeAsset> nodeAssignments, IReadOnlyDictionary<(string, string), ConnectionTypeAsset> edgeAssignments, bool verboseLogs, Vector3Int? startCellOverride, float startTime, float maxDurationSeconds)
+        private readonly int totalNodes;
+        private readonly int totalEdges;
+
+        private readonly ShapeLibrary shapeLibrary;
+        private readonly ConfigurationSpaceLibrary configSpaceLibrary;
+
+        public PlacementState(TileStampService stamp, System.Random rng, IReadOnlyDictionary<string, RoomTypeAsset> nodeAssignments, IReadOnlyDictionary<(string, string), ConnectionTypeAsset> edgeAssignments, bool verboseLogs, Vector3Int? startCellOverride, float startTime, float maxDurationSeconds, ShapeLibrary shapeLibrary, ConfigurationSpaceLibrary configSpaceLibrary)
         {
             this.stamp = stamp;
             this.rng = rng;
@@ -340,6 +413,10 @@ public class MapGraphLevelSolver
             this.startCellOverride = startCellOverride;
             this.startTime = startTime;
             this.maxDurationSeconds = maxDurationSeconds;
+            this.shapeLibrary = shapeLibrary;
+            this.configSpaceLibrary = configSpaceLibrary;
+            totalNodes = nodeAssignments?.Count ?? 0;
+            totalEdges = edgeAssignments?.Count ?? 0;
         }
 
         public bool Place(List<MapGraphFaceBuilder.Face> orderedFaces, MapGraphAsset graph)
@@ -434,7 +511,7 @@ public class MapGraphLevelSolver
                 return false;
             }
 
-            var prefabCandidates = GetRoomPrefabs(roomType, out var prefabError);
+            var prefabCandidates = GetRoomPrefabs(roomType, null, null, out var prefabError);
             if (prefabCandidates.Count == 0)
             {
                 LastError = prefabError ?? $"Room type {roomType.name} has no prefabs.";
@@ -443,6 +520,16 @@ public class MapGraphLevelSolver
 
             foreach (var prefab in prefabCandidates)
             {
+                if (!TryGetBlueprint(prefab, out var blueprint, out var bpError))
+                {
+                    LastError ??= bpError;
+                    continue;
+                }
+
+                BuildPlacementFromBlueprint(blueprint, targetCell, out var floorCells, out var wallCells);
+                if (HasOverlap(floorCells, occupiedFloor) || HasOverlap(wallCells, occupiedWall))
+                    continue;
+
                 var inst = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.identity, stampWorldParent());
                 var meta = inst.GetComponent<ModuleMetaBase>();
                 if (meta == null)
@@ -450,16 +537,11 @@ public class MapGraphLevelSolver
                     UnityEngine.Object.Destroy(inst);
                     continue;
                 }
+
                 meta.ResetUsed();
                 AlignToCell(inst.transform, targetCell);
 
                 if (!TryComputePlacement(meta, prefab, out var placement))
-                {
-                    UnityEngine.Object.Destroy(inst);
-                    continue;
-                }
-
-                if (HasOverlap(placement.FloorCells, occupiedFloor) || HasOverlap(placement.WallCells, occupiedWall))
                 {
                     UnityEngine.Object.Destroy(inst);
                     continue;
@@ -490,6 +572,7 @@ public class MapGraphLevelSolver
                 LastError = $"Anchor node {anchorId} is not placed.";
                 return false;
             }
+            var anchorPrefab = anchorPlacement.Prefab;
 
             if (!nodeAssignments.TryGetValue(targetId, out var targetRoomType) || targetRoomType == null)
             {
@@ -508,123 +591,101 @@ public class MapGraphLevelSolver
                 return false;
             }
 
-            var connectorPrefabs = GetConnectorPrefabs(connectionType, anchorSockets, out var prefabError);
-            connectorPrefabs.Shuffle(rng);
-            if (connectorPrefabs.Count == 0)
-            {
-                LastError = prefabError ?? $"Connection type {connectionType.name} has no prefabs.";
-                return false;
-            }
-
             foreach (var anchorSock in anchorSockets)
             {
+                var connectorPrefabs = GetConnectorPrefabs(connectionType, anchorSock.Side.Opposite(), NormalizeWidth(anchorSock.Width), out var prefabError);
+                connectorPrefabs.Shuffle(rng);
+                if (connectorPrefabs.Count == 0)
+                {
+                    LastError = prefabError ?? $"Connection type {connectionType.name} has no prefabs.";
+                    return false;
+                }
+
                 var anchorCell = stamp.CellFromWorld(anchorSock.transform.position);
 
                 foreach (var connPrefab in connectorPrefabs)
                 {
-                    int depthBeforeConn = placementStack.Count;
-                    var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                    var connMeta = connInst.GetComponent<ConnectorMeta>();
-                    if (connMeta == null)
-                    {
-                        UnityEngine.Object.Destroy(connInst);
+                    if (anchorPrefab != null && !HasConfigSpace(anchorPrefab, connPrefab))
                         continue;
-                    }
-                    connMeta.ResetUsed();
-
-                    // Filter connectors that don't have an opposite-side socket for this anchor socket width
-                    if (!connMeta.Sockets.Any(s => s && s.Side == anchorSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(anchorSock.Width)))
+                    if (!TryGetBlueprint(connPrefab, out var connBlueprint, out var bpError))
                     {
-                        UnityEngine.Object.Destroy(connInst);
+                        LastError ??= bpError;
                         continue;
                     }
 
-                    var s1Candidates = GetMatchingSockets(connMeta.Sockets, anchorSock.Side.Opposite(), NormalizeWidth(anchorSock.Width)).ToList();
+                    var s1Candidates = connBlueprint.Sockets
+                        .Where(s => s.Side == anchorSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(anchorSock.Width))
+                        .ToList();
                     s1Candidates.Shuffle(rng);
                     if (s1Candidates.Count == 0)
-                        s1Candidates = GetMatchingSockets(connMeta.Sockets, anchorSock.Side.Opposite(), null).ToList();
+                        s1Candidates = connBlueprint.Sockets.Where(s => s.Side == anchorSock.Side.Opposite()).ToList();
                     if (s1Candidates.Count == 0)
-                    {
-                        RollbackToDepth(depthBeforeConn);
-                        UnityEngine.Object.Destroy(connInst);
                         continue;
-                    }
-
-                    bool placed = false;
 
                     foreach (var s1 in s1Candidates)
                     {
-                        connInst.transform.position = Vector3.zero;
-                        AlignSocketToCell(connInst.transform, s1, anchorCell);
-
-                        if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
-                            continue;
-
+                        var connRootCell = anchorCell - s1.CellOffset;
+                        BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
                         var allowedAnchorStrip = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
-                        if (HasOverlap(connPlacement.FloorCells, occupiedFloor, allowedAnchorStrip))
+                        if (HasOverlap(connFloors, occupiedFloor, allowedAnchorStrip))
                             continue;
 
-                        var s2Candidates = connMeta.Sockets.Where(s => s && s != s1).ToList();
+                        var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
                         s2Candidates.Shuffle(rng);
-                        if (s2Candidates.Count == 0 && connMeta.Sockets != null)
-                            s2Candidates.AddRange(connMeta.Sockets.Where(s => s && s != s1));
                         if (s2Candidates.Count == 0)
                         {
                             LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
                             continue;
                         }
 
-                    foreach (var s2 in s2Candidates)
-                    {
-                        var s2Cell = stamp.CellFromWorld(s2.transform.position);
-            var roomPrefabs = GetRoomPrefabs(targetRoomType, out var roomPrefabsError);
-            roomPrefabs.Shuffle(rng);
-            if (roomPrefabs.Count == 0)
-            {
-                LastError = roomPrefabsError ?? $"Room type {targetRoomType.name} has no prefabs.";
-                continue;
-            }
+                        foreach (var s2 in s2Candidates)
+                        {
+                            var s2Cell = connRootCell + s2.CellOffset;
+                            var roomPrefabs = GetRoomPrefabs(targetRoomType, s2.Side.Opposite(), s2.Width, out var roomPrefabsError);
+                            roomPrefabs.Shuffle(rng);
+                            if (roomPrefabs.Count == 0)
+                            {
+                                LastError = roomPrefabsError ?? $"Room type {targetRoomType.name} has no prefabs.";
+                                continue;
+                            }
 
                             foreach (var roomPrefab in roomPrefabs)
                             {
-                                var roomInst = UnityEngine.Object.Instantiate(roomPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                                var roomMeta = roomInst.GetComponent<RoomMeta>();
-                                if (roomMeta == null)
+                                if (!HasConfigSpace(connPrefab, roomPrefab))
+                                    continue;
+                                if (!TryGetBlueprint(roomPrefab, out var roomBlueprint, out var roomBpError))
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
+                                    LastError ??= roomBpError;
                                     continue;
                                 }
-                                roomMeta.ResetUsed();
 
-                                var roomSock = GetMatchingSockets(roomMeta.Sockets, s2.Side.Opposite(), NormalizeWidth(s2.Width)).FirstOrDefault();
+                                var roomSock = roomBlueprint.Sockets.FirstOrDefault(s =>
+                                    s.Side == s2.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(s2.Width));
                                 if (roomSock == null)
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
                                     LastError ??= $"Room prefab {roomPrefab.name} missing socket for side {s2.Side.Opposite()} width {NormalizeWidth(s2.Width)}.";
                                     continue;
                                 }
 
-                                AlignSocketToCell(roomInst.transform, roomSock, s2Cell);
-
-                                if (!TryComputePlacement(roomMeta, roomPrefab, out var roomPlacement))
+                                var roomRootCell = s2Cell - roomSock.CellOffset;
+                                if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
+                                    LastError ??= $"Config space empty for {connPrefab.name}->{roomPrefab.name}.";
                                     continue;
                                 }
+                                BuildPlacementFromBlueprint(roomBlueprint, roomRootCell, out var roomFloors, out var roomWalls);
 
                                 // Overlap checks
-                                var allowedRoomFloor = new HashSet<Vector3Int>(connPlacement.FloorCells);
+                                var allowedRoomFloor = new HashSet<Vector3Int>(connFloors);
                                 allowedRoomFloor.Add(s2Cell);
-                                if (HasOverlap(roomPlacement.FloorCells, occupiedFloor, allowedRoomFloor))
+                                if (HasOverlap(roomFloors, occupiedFloor, allowedRoomFloor))
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
                                     LastError ??= $"Room {roomPrefab.name} floor overlaps on edge {anchorId}->{targetId}.";
                                     continue;
                                 }
-                                var allowedRoomWallReplace = new HashSet<Vector3Int>(connPlacement.FloorCells);
-                                if (HasOverlap(roomPlacement.WallCells, occupiedWall, allowedRoomWallReplace))
+                                var allowedRoomWallReplace = new HashSet<Vector3Int>(connFloors);
+                                if (HasOverlap(roomWalls, occupiedWall, allowedRoomWallReplace))
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
                                     LastError ??= $"Room {roomPrefab.name} walls overlap on edge {anchorId}->{targetId}.";
                                     continue;
                                 }
@@ -632,43 +693,90 @@ public class MapGraphLevelSolver
                                 var allowedConnectorWallReplace = new HashSet<Vector3Int>();
                                 if (anchorPlacement != null)
                                     foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                foreach (var wc in roomPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                if (HasOverlap(connPlacement.WallCells, occupiedWall, allowedConnectorWallReplace))
+                                foreach (var wc in roomWalls) allowedConnectorWallReplace.Add(wc);
+                                if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
                                 {
-                                    UnityEngine.Object.Destroy(roomInst);
                                     LastError ??= $"Connector walls overlap on edge {anchorId}->{targetId}.";
                                     continue;
                                 }
 
-                                connPlacement.UsedSockets.AddRange(new[] { s1, anchorSock });
-                                roomPlacement.UsedSockets.Add(roomSock);
+                                int depthBeforeConn = placementStack.Count;
+                                // Instantiate and commit after math checks pass
+                                var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                var connMeta = connInst.GetComponent<ConnectorMeta>();
+                                if (connMeta == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+                                connMeta.ResetUsed();
+                                AlignToCell(connInst.transform, connRootCell);
+                                if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+
+                                var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
+                                var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
+                                if (s1Actual == null || s2Actual == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+
+                                var roomInst = UnityEngine.Object.Instantiate(roomPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                var roomMeta = roomInst.GetComponent<RoomMeta>();
+                                if (roomMeta == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    UnityEngine.Object.Destroy(roomInst);
+                                    continue;
+                                }
+                                roomMeta.ResetUsed();
+                                AlignToCell(roomInst.transform, roomRootCell);
+                                if (!TryComputePlacement(roomMeta, roomPrefab, out var roomPlacement))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    UnityEngine.Object.Destroy(roomInst);
+                                    continue;
+                                }
+                                if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    UnityEngine.Object.Destroy(roomInst);
+                                    continue;
+                                }
+
+                                var roomSockActual = FindSocketAtCell(roomMeta.Sockets, roomSock, roomRootCell);
+                                if (roomSockActual == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    UnityEngine.Object.Destroy(roomInst);
+                                    continue;
+                                }
+
+                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, anchorSock });
+                                roomPlacement.UsedSockets.Add(roomSockActual);
                                 connPlacement.EdgeKey = key;
 
                                 CommitPlacement(null, connPlacement);
                                 CommitPlacement(targetId, roomPlacement);
                                 placedEdges.Add(key);
 
-                                placed = true;
-                                if (continueAfterPlacement != null && continueAfterPlacement())
+                                var success = continueAfterPlacement == null || continueAfterPlacement();
+                                if (success)
                                     return true;
 
                                 RollbackToDepth(depthBeforeConn);
-                                placed = false;
-                                break;
                             }
-
-                            if (placed) break;
                         }
-
-                        if (placed) break;
                     }
-
-                    if (placed)
-                        return true;
-
-                    RollbackToDepth(depthBeforeConn);
-                    if (connInst)
-                        UnityEngine.Object.Destroy(connInst);
                 }
             }
 
@@ -693,12 +801,14 @@ public class MapGraphLevelSolver
                 LastError = $"Anchor node {anchorId} is not placed.";
                 return false;
             }
+            var anchorPrefab = anchorPlacement.Prefab;
 
             if (!placedNodes.TryGetValue(targetId, out var targetPlacement) || targetPlacement?.Meta == null)
             {
                 LastError = $"Target node {targetId} is not placed.";
                 return false;
             }
+            var targetPrefab = targetPlacement.Prefab;
 
             var anchorSockets = anchorPlacement.Meta.Sockets != null
                 ? anchorPlacement.Meta.Sockets.Where(s => s && !usedSockets.Contains(s)).ToList()
@@ -720,62 +830,44 @@ public class MapGraphLevelSolver
                 return false;
             }
 
-            var connectorPrefabs = GetConnectorPrefabs(connectionType, anchorSockets, out var prefabError);
-            connectorPrefabs.Shuffle(rng);
-            if (connectorPrefabs.Count == 0)
-            {
-                LastError = prefabError ?? $"Connection type {connectionType.name} has no prefabs.";
-                return false;
-            }
-
             foreach (var anchorSock in anchorSockets)
             {
+                var connectorPrefabs = GetConnectorPrefabs(connectionType, anchorSock.Side.Opposite(), NormalizeWidth(anchorSock.Width), out var prefabError);
+                connectorPrefabs.Shuffle(rng);
+                if (connectorPrefabs.Count == 0)
+                {
+                    LastError = prefabError ?? $"Connection type {connectionType.name} has no prefabs.";
+                    return false;
+                }
+
                 var anchorCell = stamp.CellFromWorld(anchorSock.transform.position);
 
                 foreach (var connPrefab in connectorPrefabs)
                 {
-                    int depthBeforeConn = placementStack.Count;
-                    var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                    var connMeta = connInst.GetComponent<ConnectorMeta>();
-                    if (connMeta == null)
-                    {
-                        UnityEngine.Object.Destroy(connInst);
+                    if ((anchorPrefab != null && !HasConfigSpace(anchorPrefab, connPrefab)) || (targetPrefab != null && !HasConfigSpace(connPrefab, targetPrefab)))
                         continue;
-                    }
-                    connMeta.ResetUsed();
-
-                    // Skip connectors that cannot connect to the chosen anchor socket
-                    if (!connMeta.Sockets.Any(s => s && s.Side == anchorSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(anchorSock.Width)))
+                    if (!TryGetBlueprint(connPrefab, out var connBlueprint, out var bpError))
                     {
-                        UnityEngine.Object.Destroy(connInst);
+                        LastError ??= bpError;
                         continue;
                     }
 
-                    var s1Candidates = GetMatchingSockets(connMeta.Sockets, anchorSock.Side.Opposite(), NormalizeWidth(anchorSock.Width)).ToList();
+                    var s1Candidates = connBlueprint.Sockets
+                        .Where(s => s.Side == anchorSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(anchorSock.Width))
+                        .ToList();
                     s1Candidates.Shuffle(rng);
                     if (s1Candidates.Count == 0)
-                        s1Candidates = GetMatchingSockets(connMeta.Sockets, anchorSock.Side.Opposite(), null).ToList();
+                        s1Candidates = connBlueprint.Sockets.Where(s => s.Side == anchorSock.Side.Opposite()).ToList();
                     if (s1Candidates.Count == 0)
-                    {
-                        RollbackToDepth(depthBeforeConn);
-                        UnityEngine.Object.Destroy(connInst);
                         continue;
-                    }
-
-                    bool placed = false;
 
                     foreach (var s1 in s1Candidates)
                     {
-                        connInst.transform.position = Vector3.zero;
-                        AlignSocketToCell(connInst.transform, s1, anchorCell);
+                        var connRootCell = anchorCell - s1.CellOffset;
+                        BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
 
-                        if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
-                            continue;
-
-                        var s2Candidates = connMeta.Sockets.Where(s => s && s != s1).ToList();
+                        var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
                         s2Candidates.Shuffle(rng);
-                        if (s2Candidates.Count == 0 && connMeta.Sockets != null)
-                            s2Candidates.AddRange(connMeta.Sockets.Where(s => s && s != s1));
                         if (s2Candidates.Count == 0)
                         {
                             LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
@@ -789,43 +881,69 @@ public class MapGraphLevelSolver
                                          NormalizeWidth(ts.Width) == NormalizeWidth(s2.Width)))
                             {
                                 var targetCell = stamp.CellFromWorld(targetSock.transform.position);
-                                var s2Cell = stamp.CellFromWorld(s2.transform.position);
+                                var s2Cell = connRootCell + s2.CellOffset;
                                 if (s2Cell != targetCell)
+                                    continue;
+
+                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                    continue;
+                                if (!FitsConfigSpace(connPrefab, targetPrefab, connRootCell, targetPlacement.RootCell))
                                     continue;
 
                                 var allowedFloor = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
                                 foreach (var c in AllowedWidthStrip(targetCell, s2.Side, s2.Width)) allowedFloor.Add(c);
-                                if (HasOverlap(connPlacement.FloorCells, occupiedFloor, allowedFloor))
+                                if (HasOverlap(connFloors, occupiedFloor, allowedFloor))
                                     continue;
 
                                 var allowedConnectorWallReplace = new HashSet<Vector3Int>();
                                 foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
                                 foreach (var wc in targetPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                if (HasOverlap(connPlacement.WallCells, occupiedWall, allowedConnectorWallReplace))
+                                if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
                                     continue;
 
-                                connPlacement.UsedSockets.AddRange(new[] { s1, anchorSock, targetSock });
+                                int depthBeforeConn = placementStack.Count;
+
+                                var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                var connMeta = connInst.GetComponent<ConnectorMeta>();
+                                if (connMeta == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+                                connMeta.ResetUsed();
+                                AlignToCell(connInst.transform, connRootCell);
+                                if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+
+                                var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
+                                var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
+                                if (s1Actual == null || s2Actual == null)
+                                {
+                                    UnityEngine.Object.Destroy(connInst);
+                                    continue;
+                                }
+
+                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, anchorSock, targetSock });
                                 connPlacement.EdgeKey = key;
 
                                 CommitPlacement(null, connPlacement);
-                            placedEdges.Add(key);
-                            placed = true;
-                            if (continueAfterPlacement != null && continueAfterPlacement())
-                                return true;
+                                placedEdges.Add(key);
+                                var success = continueAfterPlacement == null || continueAfterPlacement();
+                                if (success)
+                                    return true;
 
-                            RollbackToDepth(depthBeforeConn);
-                            placed = false;
-                            break;
+                                RollbackToDepth(depthBeforeConn);
+                            }
                         }
-
-                            if (placed) break;
-                        }
-
-                        if (placed) break;
                     }
-
-                    if (connInst)
-                        UnityEngine.Object.Destroy(connInst);
                 }
             }
 
@@ -905,11 +1023,89 @@ public class MapGraphLevelSolver
             foreach (var off in cached.WallOffsets)
                 walls.Add(rootCell + off);
 
-            placement = new Placement(meta, floors, walls);
+            placement = new Placement(meta, floors, walls, prefab, rootCell);
             return true;
         }
 
-        private List<GameObject> GetConnectorPrefabs(ConnectionTypeAsset connectionType, List<DoorSocket> anchorSockets, out string error)
+        private bool TryGetBlueprint(GameObject prefab, out ModuleBlueprint blueprint, out string error)
+        {
+            blueprint = null;
+            error = null;
+            if (prefab == null)
+            {
+                error = "Prefab is null.";
+                return false;
+            }
+
+            if (blueprintCache.TryGetValue(prefab, out blueprint))
+                return true;
+
+            var inst = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+            var meta = inst ? inst.GetComponent<ModuleMetaBase>() : null;
+            if (meta == null)
+            {
+                if (inst) UnityEngine.Object.Destroy(inst);
+                error = $"Prefab {prefab.name} has no ModuleMetaBase.";
+                return false;
+            }
+
+            meta.ResetUsed();
+            AlignToCell(meta.transform, Vector3Int.zero);
+            var rootCell = stamp.CellFromWorld(meta.transform.position);
+
+            var floorCells = stamp.CollectModuleFloorCells(meta);
+            var wallCells = stamp.CollectModuleWallCells(meta);
+
+            var floorOffsets = new List<Vector3Int>(floorCells.Count);
+            foreach (var c in floorCells) floorOffsets.Add(c - rootCell);
+            var wallOffsets = new List<Vector3Int>(wallCells.Count);
+            foreach (var c in wallCells) wallOffsets.Add(c - rootCell);
+
+            var sockets = new List<SocketInfo>();
+            if (meta.Sockets != null)
+            {
+                foreach (var s in meta.Sockets)
+                {
+                    if (s == null) continue;
+                    var sockCell = stamp.CellFromWorld(s.transform.position);
+                    sockets.Add(new SocketInfo(s.Side, NormalizeWidth(s.Width), sockCell - rootCell));
+                }
+            }
+
+            blueprint = new ModuleBlueprint(floorOffsets, wallOffsets, sockets);
+            blueprintCache[prefab] = blueprint;
+            UnityEngine.Object.Destroy(inst);
+            return true;
+        }
+
+        private void BuildPlacementFromBlueprint(ModuleBlueprint blueprint, Vector3Int rootCell, out HashSet<Vector3Int> floors, out HashSet<Vector3Int> walls)
+        {
+            floors = new HashSet<Vector3Int>();
+            walls = new HashSet<Vector3Int>();
+            if (blueprint == null) return;
+            foreach (var off in blueprint.FloorOffsets)
+                floors.Add(rootCell + off);
+            foreach (var off in blueprint.WallOffsets)
+                walls.Add(rootCell + off);
+        }
+
+        private DoorSocket FindSocketAtCell(IEnumerable<DoorSocket> sockets, SocketInfo target, Vector3Int rootCell, DoorSocket exclude = null)
+        {
+            if (sockets == null || target == null) return null;
+            var wantedCell = rootCell + target.CellOffset;
+            foreach (var socket in sockets)
+            {
+                if (socket == null || socket == exclude) continue;
+                if (socket.Side != target.Side) continue;
+                if (NormalizeWidth(socket.Width) != NormalizeWidth(target.Width)) continue;
+                var cell = stamp.CellFromWorld(socket.transform.position);
+                if (cell == wantedCell)
+                    return socket;
+            }
+            return null;
+        }
+
+        private List<GameObject> GetConnectorPrefabs(ConnectionTypeAsset connectionType, DoorSide requiredSide, int requiredWidth, out string error)
         {
             error = null;
             if (connectionType == null)
@@ -918,35 +1114,30 @@ public class MapGraphLevelSolver
                 return new List<GameObject>();
             }
 
+            var key = (connectionType, requiredSide, NormalizeWidth(requiredWidth));
+            if (connectorPrefabCache.TryGetValue(key, out var cached))
+                return new List<GameObject>(cached);
+
             var prefabs = connectionType.prefabs ?? new List<GameObject>();
             var result = new List<GameObject>();
             foreach (var prefab in prefabs)
             {
                 if (prefab == null) continue;
-                var meta = prefab.GetComponent<ConnectorMeta>();
-                if (meta == null || meta.Sockets == null) continue;
-                if (anchorSockets == null || anchorSockets.Count == 0)
-                {
-                    result.Add(prefab);
-                    continue;
-                }
-
-                // At least one anchor socket must have an opposite match in connector
-                bool matchesAnyAnchor = anchorSockets.Any(a =>
-                    a != null && meta.Sockets.Any(s => s && s.Side == a.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(a.Width)));
-                if (matchesAnyAnchor)
+                if (!TryGetBlueprint(prefab, out var bp, out _)) continue;
+                if (bp.Sockets.Any(s => s.Side == requiredSide && NormalizeWidth(s.Width) == NormalizeWidth(requiredWidth)))
                     result.Add(prefab);
             }
 
             if (result.Count == 0 && prefabs.Count == 0)
                 error = $"Connection type {connectionType.name} has no prefabs.";
             else if (result.Count == 0)
-                error = $"No connector prefabs match anchor sockets for {connectionType.name}.";
+                error = $"No connector prefabs match side {requiredSide} width {NormalizeWidth(requiredWidth)} for {connectionType.name}.";
 
+            connectorPrefabCache[key] = new List<GameObject>(result);
             return result;
         }
 
-        private List<GameObject> GetRoomPrefabs(RoomTypeAsset roomType, out string error)
+        private List<GameObject> GetRoomPrefabs(RoomTypeAsset roomType, DoorSide? requiredSide, int? requiredWidth, out string error)
         {
             error = null;
             if (roomType == null)
@@ -955,21 +1146,33 @@ public class MapGraphLevelSolver
                 return new List<GameObject>();
             }
 
+            var normalizedWidth = requiredWidth.HasValue ? NormalizeWidth(requiredWidth.Value) : 0;
+            var key = (roomType, requiredSide ?? DoorSide.North, normalizedWidth);
+            if (roomPrefabCache.TryGetValue(key, out var cached))
+                return new List<GameObject>(cached);
+
             var prefabs = roomType.prefabs ?? new List<GameObject>();
             var result = new List<GameObject>();
             foreach (var prefab in prefabs)
             {
                 if (prefab == null) continue;
-                var meta = prefab.GetComponent<RoomMeta>();
-                if (meta == null || meta.Sockets == null) continue;
-                result.Add(prefab);
+                if (!TryGetBlueprint(prefab, out var bp, out _)) continue;
+                if (!requiredSide.HasValue)
+                {
+                    result.Add(prefab);
+                    continue;
+                }
+
+                if (bp.Sockets.Any(s => s.Side == requiredSide.Value && NormalizeWidth(s.Width) == normalizedWidth))
+                    result.Add(prefab);
             }
 
             if (result.Count == 0 && prefabs.Count == 0)
                 error = $"Room type {roomType.name} has no prefabs.";
             else if (result.Count == 0)
-                error = $"No valid prefabs found for room type {roomType.name}.";
+                error = $"No room prefabs match side {requiredSide} width {normalizedWidth} for type {roomType.name}.";
 
+            roomPrefabCache[key] = new List<GameObject>(result);
             return result;
         }
 
@@ -983,12 +1186,34 @@ public class MapGraphLevelSolver
             return false;
         }
 
+        private bool HasConfigSpace(GameObject fixedPrefab, GameObject movingPrefab)
+        {
+            if (configSpaceLibrary == null || fixedPrefab == null || movingPrefab == null)
+                return false;
+            if (!configSpaceLibrary.TryGetSpace(fixedPrefab, movingPrefab, out var space, out _))
+                return false;
+            return space != null && !space.IsEmpty;
+        }
+
+        private bool FitsConfigSpace(GameObject fixedPrefab, GameObject movingPrefab, Vector3Int fixedRootCell, Vector3Int movingRootCell)
+        {
+            if (configSpaceLibrary == null || fixedPrefab == null || movingPrefab == null)
+                return false;
+            if (!configSpaceLibrary.TryGetSpace(fixedPrefab, movingPrefab, out var space, out _))
+                return false;
+            var delta = new Vector2Int(movingRootCell.x - fixedRootCell.x, movingRootCell.y - fixedRootCell.y);
+            return space.Contains(delta);
+        }
+
         private bool CheckTimeLimit()
         {
             if (maxDurationSeconds <= 0f) return true;
             if (Time.realtimeSinceStartup - startTime <= maxDurationSeconds)
                 return true;
-            LastError ??= "Placement time limit exceeded.";
+            var msg = $"Placement time limit exceeded. Nodes placed {placedNodes.Count}/{totalNodes}, edges placed {placedEdges.Count}/{totalEdges}.";
+            if (verboseLogs)
+                Debug.Log($"[MapGraphLevelSolver] {msg}");
+            LastError ??= msg;
             return false;
         }
 
@@ -1025,15 +1250,31 @@ public class MapGraphLevelSolver
             }
         }
 
-        public void StampAll()
+        public void StampAll(bool disableRenderers = true)
         {
             foreach (var placement in placementStack)
             {
                 if (placement.Meta == null) continue;
                 stamp.StampModuleFloor(placement.Meta);
                 stamp.StampModuleWalls(placement.Meta);
-                stamp.DisableRenderers(placement.Meta.transform);
+                if (disableRenderers)
+                    stamp.DisableRenderers(placement.Meta.transform);
             }
+        }
+
+        public void DestroyPlacedInstances()
+        {
+            foreach (var placement in placementStack)
+            {
+                if (placement.Meta != null)
+                    UnityEngine.Object.Destroy(placement.Meta.gameObject);
+            }
+            placementStack.Clear();
+            placedNodes.Clear();
+            placedEdges.Clear();
+            occupiedFloor.Clear();
+            occupiedWall.Clear();
+            usedSockets.Clear();
         }
 
         public void Cleanup()
@@ -1087,14 +1328,18 @@ public class MapGraphLevelSolver
             public HashSet<Vector3Int> WallCells { get; }
             public List<DoorSocket> UsedSockets { get; }
             public (string,string)? EdgeKey { get; set; }
+            public GameObject Prefab { get; }
+            public Vector3Int RootCell { get; }
 
-            public Placement(ModuleMetaBase meta, HashSet<Vector3Int> floors, HashSet<Vector3Int> walls)
+            public Placement(ModuleMetaBase meta, HashSet<Vector3Int> floors, HashSet<Vector3Int> walls, GameObject prefab, Vector3Int rootCell)
             {
                 Meta = meta;
                 FloorCells = floors ?? new HashSet<Vector3Int>();
                 WallCells = walls ?? new HashSet<Vector3Int>();
                 UsedSockets = new List<DoorSocket>();
                 EdgeKey = null;
+                Prefab = prefab;
+                RootCell = rootCell;
             }
         }
 
@@ -1107,6 +1352,34 @@ public class MapGraphLevelSolver
             {
                 FloorOffsets = floorOffsets ?? new List<Vector3Int>();
                 WallOffsets = wallOffsets ?? new List<Vector3Int>();
+            }
+        }
+
+        private sealed class ModuleBlueprint
+        {
+            public List<Vector3Int> FloorOffsets { get; }
+            public List<Vector3Int> WallOffsets { get; }
+            public List<SocketInfo> Sockets { get; }
+
+            public ModuleBlueprint(List<Vector3Int> floorOffsets, List<Vector3Int> wallOffsets, List<SocketInfo> sockets)
+            {
+                FloorOffsets = floorOffsets ?? new List<Vector3Int>();
+                WallOffsets = wallOffsets ?? new List<Vector3Int>();
+                Sockets = sockets ?? new List<SocketInfo>();
+            }
+        }
+
+        private sealed class SocketInfo
+        {
+            public DoorSide Side { get; }
+            public int Width { get; }
+            public Vector3Int CellOffset { get; }
+
+            public SocketInfo(DoorSide side, int width, Vector3Int cellOffset)
+            {
+                Side = side;
+                Width = width;
+                CellOffset = cellOffset;
             }
         }
     }

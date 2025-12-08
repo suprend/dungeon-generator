@@ -20,6 +20,10 @@ public class GraphMapBuilder : MonoBehaviour
     public bool clearOnRun = true;
     public int randomSeed = 0; // 0 = random
     public bool verboseLogs = false;
+    [Tooltip("Time limit for placement (seconds). 0 = unlimited")]
+    public float placementTimeLimitSeconds = 5f;
+    [Tooltip("Destroy placed prefab instances after stamping (keeps only tiles).")]
+    public bool destroyPlacedInstances = true;
 
     private void Awake()
     {
@@ -43,7 +47,7 @@ public class GraphMapBuilder : MonoBehaviour
 
         var solver = new MapGraphLevelSolver(graph);
         Vector3Int? startCell = targetGrid != null ? targetGrid.WorldToCell(transform.position) : null;
-        if (!solver.TrySolveAndPlace(targetGrid, floorMap, wallMap, clearOnRun, randomSeed, verboseLogs, startCell, out var error))
+        if (!solver.TrySolveAndPlace(targetGrid, floorMap, wallMap, clearOnRun, randomSeed, verboseLogs, startCell, out var error, placementTimeLimitSeconds, destroyPlacedInstances))
         {
             Debug.LogError($"[GraphMapBuilder] Generation failed: {error}");
         }

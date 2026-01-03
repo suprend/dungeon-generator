@@ -31,7 +31,13 @@ public sealed partial class MapGraphLayoutGenerator
             for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
             {
                 var perturbed = PerturbLayout(current, chain);
-                if (perturbed != null && IsValidLayout(perturbed.Rooms))
+                var currentEnergy = current.EnergyCache != null ? current.EnergyCache.TotalEnergy : ComputeEnergy(current.Rooms);
+                var perturbedEnergy = perturbed != null
+                    ? (perturbed.EnergyCache != null ? perturbed.EnergyCache.TotalEnergy : ComputeEnergy(perturbed.Rooms))
+                    : float.MaxValue;
+                var delta = perturbedEnergy - currentEnergy;
+
+                if (perturbed != null && ShouldValidateForOutput(perturbed) && IsValidLayout(perturbed.Rooms))
                 {
                     if (DifferentEnough(perturbed, generated, chain))
                     {
@@ -40,10 +46,6 @@ public sealed partial class MapGraphLayoutGenerator
                             return generated;
                     }
                 }
-
-                var currentEnergy = ComputeEnergy(current.Rooms);
-                var perturbedEnergy = perturbed != null ? ComputeEnergy(perturbed.Rooms) : float.MaxValue;
-                var delta = perturbedEnergy - currentEnergy;
 
                 if (delta < 0f)
                 {
@@ -117,7 +119,7 @@ public sealed partial class MapGraphLayoutGenerator
             rooms[node.id] = bestPlacement;
         }
 
-        return new LayoutState(rooms, baseState.ChainIndex);
+        return new LayoutState(rooms, baseState.ChainIndex, BuildEnergyCache(rooms));
     }
 
     private List<MapGraphAsset.NodeData> BuildChainBfsOrder(MapGraphChainBuilder.Chain chain, Dictionary<string, RoomPlacement> placed)
@@ -219,7 +221,9 @@ public sealed partial class MapGraphLayoutGenerator
         var newRoot = candidates[rng.Next(candidates.Count)];
         rooms[targetId] = new RoomPlacement(targetId, newPrefab, newShape, newRoot);
 
-        return new LayoutState(rooms, state.ChainIndex);
+        var baseCache = state.EnergyCache ?? BuildEnergyCache(state.Rooms);
+        var newCache = baseCache != null ? UpdateEnergyCacheForMove(baseCache, state.Rooms, rooms, targetId) : null;
+        return new LayoutState(rooms, state.ChainIndex, newCache);
     }
 
     private List<Vector2Int> WiggleCandidates(string nodeId, GameObject prefab, ModuleShape shape, Dictionary<string, RoomPlacement> placed)
@@ -243,6 +247,18 @@ public sealed partial class MapGraphLayoutGenerator
             if (result.Count >= Mathf.Max(1, settings.MaxWiggleCandidates)) break;
         }
         return result;
+    }
+
+    private bool ShouldValidateForOutput(LayoutState candidate)
+    {
+        if (candidate?.EnergyCache == null)
+            return false;
+
+        // Only pay the expensive O(n^2) validation cost when the cached energy indicates a full solution:
+        // - zero illegal overlaps
+        // - all currently-placed edges are touching (distance penalty == 0)
+        return candidate.EnergyCache.OverlapPenaltySum <= 0.0001f &&
+               candidate.EnergyCache.DistancePenaltySum <= 0.0001f;
     }
 
     private bool DifferentEnough(LayoutState candidate, List<LayoutState> existing, MapGraphChainBuilder.Chain chain)
@@ -288,4 +304,3 @@ public sealed partial class MapGraphLayoutGenerator
         return Mathf.Max(1f, avgArea * 0.25f);
     }
 }
-

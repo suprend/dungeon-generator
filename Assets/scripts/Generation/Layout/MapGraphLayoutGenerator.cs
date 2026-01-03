@@ -153,7 +153,7 @@ public sealed partial class MapGraphLayoutGenerator
 
         lastFailureDetail = null;
 
-        var initialLayout = new LayoutState(new Dictionary<string, RoomPlacement>(), 0);
+        var initialLayout = new LayoutState(new Dictionary<string, RoomPlacement>(), 0, energyCache: null);
         var stack = new Stack<LayoutState>();
         stack.Push(initialLayout);
 
@@ -176,7 +176,7 @@ public sealed partial class MapGraphLayoutGenerator
             var expansions = AddChain(state, chain, maxLayouts);
             foreach (var exp in expansions)
             {
-                stack.Push(new LayoutState(exp.Rooms, state.ChainIndex + 1));
+                stack.Push(exp.WithChainIndex(state.ChainIndex + 1));
             }
         }
 
@@ -190,12 +190,18 @@ public sealed partial class MapGraphLayoutGenerator
     {
         public Dictionary<string, RoomPlacement> Rooms { get; }
         public int ChainIndex { get; }
+        public EnergyCache EnergyCache { get; }
 
-        public LayoutState(Dictionary<string, RoomPlacement> rooms, int chainIndex)
+        public LayoutState(Dictionary<string, RoomPlacement> rooms, int chainIndex, EnergyCache energyCache)
         {
             Rooms = rooms ?? new Dictionary<string, RoomPlacement>();
             ChainIndex = chainIndex;
+            EnergyCache = energyCache;
+        }
+
+        public LayoutState WithChainIndex(int chainIndex)
+        {
+            return new LayoutState(Rooms, chainIndex, EnergyCache);
         }
     }
 }
-

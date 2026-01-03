@@ -92,7 +92,7 @@ public partial class MapGraphLevelSolver
                 configSpaceLibrary?.SetDebug(layoutSettings.VerboseConfigSpaceLogs, layoutSettings.MaxConfigSpaceLogs);
 
             var solveStartTime = Time.realtimeSinceStartup;
-            if (!TrySolve(out var nodeAssign, out var edgeAssign, out error))
+            if (!TryBuildDirectAssignments(expandedGraph, out var nodeAssign, out var edgeAssign, out error))
                 return false;
             var solveSeconds = Time.realtimeSinceStartup - solveStartTime;
 
@@ -211,4 +211,3 @@ public partial class MapGraphLevelSolver
             layoutAttempts);
     }
 }
-

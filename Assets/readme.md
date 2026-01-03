@@ -19,6 +19,71 @@ README описывает **полный алгоритм** из двух ста
 
 ---
 
+## 0.1) Как это устроено в реализации (pipeline)
+
+Ниже — **реальная последовательность стадий в коде**: “что выбрать” (solver) отделено от “куда поставить” (layout), а финальный `placement` просто переносит рассчитанный layout в Unity сцены/тайлмапы.
+
+### Стадия A — Подготовка входа и графа
+1) **Исходный вход**: `MapGraphAsset` (узлы/рёбра, room types/connection types, списки префабов).
+2) **Расширение графа (edge-rooms)**: каждое исходное ребро превращается в corridor-room вершину `c(u,v)` и два ребра `(u,c)` и `(c,v)` (см. 1.1).
+3) **Planar embedding → faces → chains**:
+   - `MapGraphFaceBuilder` строит faces планарного вложения,
+   - `MapGraphChainBuilder` строит упорядоченный список chain’ов (smallest face → BFS faces → остаток acyclic).
+
+### Стадия B — Геометрия префабов и configuration spaces (CS)
+4) **Сбор дискретной геометрии из префабов**:
+   - `TileStampService` читает `Tilemap`-ы пола/стен и собирает occupied клетки,
+   - `ShapeLibrary` кэширует `ModuleShape` (floorCells, wallCells, sockets).
+5) **Предвычисление CS**:
+   - `ConfigurationSpaceLibrary` для каждой пары `(fixedPrefab, movingPrefab)` строит множество допустимых смещений `delta`,
+   - учитываются правила `Room↔Corridor`, `1-tile bite` и `carve-mask` (1.3.1).
+
+Логи:
+- `[ConfigSpace] Empty offsets for A -> B` — для пары префабов CS пустое (часто сигнал “нет совместимых сокетов / конфликт стен/пола / неверная геометрия префаба”).
+- `[ConfigSpace][dbg] ... => reject ...` — детальные причины отбраковки (включается флагом verbose).
+
+### Стадия C — Solver (“что ставим”)
+6) **Assignment / backtracking** (`MapGraphLevelSolver.AssignmentSolver`):
+   - выбирает `RoomTypeAsset`/`ConnectionTypeAsset` и конкретные префабы для узлов/рёбер с учётом ограничений (в т.ч. доступных сокетов и непустых CS),
+   - делает это через backtracking: пробует назначение → проверяет локальные ограничения → при тупике откатывается.
+
+Выход solver’а: *для каждого node/edge известен prefab*, но **координат ещё нет**.
+
+### Стадия D — Layout generator (“куда ставим”)
+7) **Incremental layout по chain’ам** (`MapGraphLayoutGenerator.TryGenerate`):
+   - держит стек частичных раскладок (`LayoutState`),
+   - добавляет chain’ы по очереди; если chain не удаётся расширить — backtracking к альтернативному partial layout.
+8) **AddChain()**:
+   - `GetInitialLayout()` — жадный старт (BFS по вершинам chain, подбор позиций через CS с минимальной энергией),
+   - затем SA (simulated annealing): `PerturbLayout` случайно меняет один узел chain (shape или position) и принимает/отклоняет по энергии.
+9) **Кандидаты позиций**:
+   - позиции берутся из **пересечения CS** с уже размещёнными соседями,
+   - если пересечение пустое — fallback “удовлетворить максимум соседей”,
+   - **на этапе генерации кандидатов пересечения не фильтруются** (7.1.1): SA имеет право временно держать “плохие” состояния и снижать энергию.
+10) **Энергия** (`ComputeEnergy`) штрафует:
+   - `A_tiles`: пересечения (floor↔floor кроме bite; wall↔floor кроме carve-зон),
+   - `D_tiles`: расстояние для рёбер, которые ещё не “в контакте” по CS.
+
+Практическая оптимизация: энергия считается **инкрементально** на шагах SA (меняется одна вершина → пересчитываются только пары/рёбра, связанные с ней).
+
+Логи:
+- `[LayoutGenerator] No position candidates for node ...` — для узла нет позиций даже по fallback.
+- `[LayoutGenerator] AddChain produced 0 layouts for chain [...]` — chain не дал ни одного результата.
+- `Last failure: ...` — точная причина финального провала (например, “disconnected layout reachable X/Y”).
+
+### Стадия E — Placement и Bake в Unity
+11) **Placement из layout** (`PlacementState.PlaceFromLayout`):
+   - инстанцирует префабы в сцене и выравнивает по `root` (Grid),
+   - применяет carve-mask (1.3.1) на коннекторах (удаляет боковые wall-клетки у входов),
+   - делает финальные проверки пересечений (строгая валидность) и коммитит в occupancy state.
+12) **Stamp в Tilemap** (`TileStampService`):
+   - ставит floor/walls тайлы,
+   - может отключать renderers у инстансов и/или удалять инстансы после bake.
+
+Логи:
+- `[MapGraphLevelSolver] Timings (s): precompute=... solve=... layout=... place=... stamp=... total=...` — разрез по стадиям.
+- `[GraphMapBuilder] Generation failed: ...` — итоговая ошибка, которую видно даже если Warning отключены.
+
 ## 1) Проектные уточнения (Unity/Tilemap, обязательные)
 
 ### 1.1. Все рёбра — это тоже “комнаты” (corridor-room)
@@ -80,7 +145,7 @@ README описывает **полный алгоритм** из двух ста
 В реализации геометрия шаблонов берётся **не из ScriptableObject**, а прямо из **префабов** (инстанцируются на сцене для анализа).
 
 **Общее для любых модулей (Room и CorridorRoom):**
-- на корне префаба должен быть `ModuleMetaBase` (`Assets/scripts/ModuleMetaBase.cs`),
+- на корне префаба должен быть `ModuleMetaBase` (`Assets/Scripts/Modules/ModuleMetaBase.cs`),
 - сокеты можно задавать двумя способами:
   - вручную: в `ModuleMetaBase.Sockets` перечислить `DoorSocket` дочерние объекты,
   - полуавтоматически: добавить `DoorSocketSpan` на стену (см. ниже) и оставить `ModuleMetaBase.AutoCollectSockets = true` (по умолчанию),
@@ -93,12 +158,12 @@ README описывает **полный алгоритм** из двух ста
   - именно эти тайлы используются для `footprint/overlap` и для финального bake.
 
 **Room prefab (вершина-графа):**
-- компонент на корне: `RoomMeta : ModuleMetaBase` (`Assets/scripts/RoomMeta.cs`),
+- компонент на корне: `RoomMeta : ModuleMetaBase` (`Assets/Scripts/Modules/RoomMeta.cs`),
 - количество сокетов: `0..N` (по дизайну/шаблону),
 - важно: клетка сокета должна быть частью пола комнаты (иначе строгий “bite” не сработает).
 
 **CorridorRoom prefab (edge-room, вставленная вершина):**
-- компонент на корне: `ConnectorMeta : ModuleMetaBase` (`Assets/scripts/ConnectorMeta.cs`),
+- компонент на корне: `ConnectorMeta : ModuleMetaBase` (`Assets/Scripts/Modules/ConnectorMeta.cs`),
 - обычно 2 сокета (вход/выход), чтобы соединяться с двумя комнатами,
 - по дизайну **не соединяется** с другим `ConnectorMeta` (только `RoomMeta ↔ ConnectorMeta`).
 
@@ -109,7 +174,7 @@ README описывает **полный алгоритм** из двух ста
 Примечание для текущей реализации: у Room префабов клетка сокета может визуально быть стеной; при вычислении геометрии она всё равно считается “проёмной” (как пол) по факту наличия `DoorSocket`.
 
 ### 2.2. DoorSocketSpan (дискретный “радиус” по стене, чтобы не проставлять много сокетов руками)
-Если проставлять много `DoorSocket` руками неудобно, используйте `DoorSocketSpan` (`Assets/scripts/DoorSocketSpan.cs`):
+Если проставлять много `DoorSocket` руками неудобно, используйте `DoorSocketSpan` (`Assets/Scripts/Modules/DoorSocketSpan.cs`):
 - это компонент-маркер (обычно дочерний объект комнаты/коннектора) с полями:
   - `Side` — направление наружу,
   - `Radius` — сколько тайлов влево/вправо (по касательной к стене) разрешены как точки стыка, `0` = одна точка,

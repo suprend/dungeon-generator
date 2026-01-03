@@ -1,0 +1,278 @@
+// Assets/scripts/Generation/Graph/MapGraphLayoutGenerator.Energy.cs
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+public sealed partial class MapGraphLayoutGenerator
+{
+    private const float OverlapWeight = 1000f;
+    private const float DistanceWeight = 1f;
+
+    private sealed class EnergyCache
+    {
+        public float OverlapPenaltySum { get; set; }
+        public float DistancePenaltySum { get; set; }
+        public Dictionary<(string a, string b), float> PairPenalty { get; }
+        public Dictionary<(string a, string b), float> EdgePenalty { get; }
+        public float TotalEnergy => OverlapWeight * OverlapPenaltySum + DistanceWeight * DistancePenaltySum;
+
+        public EnergyCache(
+            float overlapPenaltySum,
+            float distancePenaltySum,
+            Dictionary<(string a, string b), float> pairPenalty,
+            Dictionary<(string a, string b), float> edgePenalty)
+        {
+            OverlapPenaltySum = overlapPenaltySum;
+            DistancePenaltySum = distancePenaltySum;
+            PairPenalty = pairPenalty ?? new Dictionary<(string a, string b), float>();
+            EdgePenalty = edgePenalty ?? new Dictionary<(string a, string b), float>();
+        }
+    }
+
+    private float ComputeEnergy(Dictionary<string, RoomPlacement> rooms)
+    {
+        float overlapArea = 0f;
+        var list = rooms.Values.ToList();
+        for (int i = 0; i < list.Count; i++)
+        {
+            for (int j = i + 1; j < list.Count; j++)
+            {
+                overlapArea += IntersectionPenalty(list[i], list[j]);
+            }
+        }
+
+        float distPenalty = 0f;
+        foreach (var edge in graphAsset.Edges)
+        {
+            if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                continue;
+            if (!rooms.TryGetValue(edge.fromNodeId, out var a) || !rooms.TryGetValue(edge.toNodeId, out var b))
+                continue;
+            if (RoomsTouchEitherWay(a, b))
+                continue;
+            var da = CenterOf(a);
+            var db = CenterOf(b);
+            var diff = da - db;
+            distPenalty += diff.sqrMagnitude;
+        }
+
+        return OverlapWeight * overlapArea + DistanceWeight * distPenalty;
+    }
+
+    private EnergyCache BuildEnergyCache(Dictionary<string, RoomPlacement> rooms)
+    {
+        if (rooms == null)
+            return new EnergyCache(0f, 0f, new Dictionary<(string a, string b), float>(), new Dictionary<(string a, string b), float>());
+
+        float overlapSum = 0f;
+        var pairPenalty = new Dictionary<(string a, string b), float>();
+        var list = rooms.Values.ToList();
+        for (int i = 0; i < list.Count; i++)
+        {
+            for (int j = i + 1; j < list.Count; j++)
+            {
+                var a = list[i];
+                var b = list[j];
+                if (a == null || b == null)
+                    continue;
+                var key = PairKey(a.NodeId, b.NodeId);
+                var p = IntersectionPenalty(a, b);
+                pairPenalty[key] = p;
+                overlapSum += p;
+            }
+        }
+
+        float distSum = 0f;
+        var edgePenalty = new Dictionary<(string a, string b), float>();
+        if (graphAsset != null)
+        {
+            foreach (var edge in graphAsset.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                if (!rooms.TryGetValue(edge.fromNodeId, out var a) || !rooms.TryGetValue(edge.toNodeId, out var b))
+                    continue;
+                var key = PairKey(edge.fromNodeId, edge.toNodeId);
+                var p = ComputeEdgeDistancePenalty(a, b);
+                edgePenalty[key] = p;
+                distSum += p;
+            }
+        }
+
+        return new EnergyCache(overlapSum, distSum, pairPenalty, edgePenalty);
+    }
+
+    private EnergyCache UpdateEnergyCacheForMove(EnergyCache baseCache, Dictionary<string, RoomPlacement> roomsBefore, Dictionary<string, RoomPlacement> roomsAfter, string changedId)
+    {
+        if (baseCache == null)
+            return BuildEnergyCache(roomsAfter);
+        if (roomsAfter == null || string.IsNullOrEmpty(changedId) || !roomsAfter.TryGetValue(changedId, out var changedAfter))
+            return BuildEnergyCache(roomsAfter);
+
+        var nextPairPenalty = new Dictionary<(string a, string b), float>(baseCache.PairPenalty);
+        var nextEdgePenalty = new Dictionary<(string a, string b), float>(baseCache.EdgePenalty);
+        float overlapSum = baseCache.OverlapPenaltySum;
+        float distSum = baseCache.DistancePenaltySum;
+
+        // Update pair penalties for (changed, other).
+        foreach (var otherId in roomsAfter.Keys)
+        {
+            if (otherId == changedId)
+                continue;
+            if (!roomsAfter.TryGetValue(otherId, out var otherPlacement) || otherPlacement == null)
+                continue;
+
+            var key = PairKey(changedId, otherId);
+            if (nextPairPenalty.TryGetValue(key, out var oldP))
+                overlapSum -= oldP;
+            var newP = IntersectionPenalty(changedAfter, otherPlacement);
+            nextPairPenalty[key] = newP;
+            overlapSum += newP;
+        }
+
+        // Update distance penalties only for edges incident to changed node.
+        if (graphAsset != null)
+        {
+            var touched = new HashSet<(string a, string b)>();
+            foreach (var edge in graphAsset.GetEdgesFor(changedId))
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                var aId = edge.fromNodeId;
+                var bId = edge.toNodeId;
+                var key = PairKey(aId, bId);
+                if (!touched.Add(key))
+                    continue;
+                if (!roomsAfter.TryGetValue(aId, out var a) || !roomsAfter.TryGetValue(bId, out var b))
+                    continue;
+
+                if (nextEdgePenalty.TryGetValue(key, out var oldD))
+                    distSum -= oldD;
+                var newD = ComputeEdgeDistancePenalty(a, b);
+                nextEdgePenalty[key] = newD;
+                distSum += newD;
+            }
+        }
+
+        return new EnergyCache(overlapSum, distSum, nextPairPenalty, nextEdgePenalty);
+    }
+
+    private float ComputeEdgeDistancePenalty(RoomPlacement a, RoomPlacement b)
+    {
+        if (a == null || b == null)
+            return 0f;
+        if (RoomsTouchEitherWay(a, b))
+            return 0f;
+        var da = CenterOf(a);
+        var db = CenterOf(b);
+        var diff = da - db;
+        return diff.sqrMagnitude;
+    }
+
+    private static (string a, string b) PairKey(string a, string b)
+    {
+        if (string.CompareOrdinal(a, b) <= 0)
+            return (a, b);
+        return (b, a);
+    }
+
+    private float IntersectionArea(RoomPlacement a, RoomPlacement b)
+    {
+        if (a == null || b == null)
+            return 0f;
+
+        var overlapCount = CountOverlapCells(a.WorldCells, b.WorldCells, out _);
+        if (overlapCount == 0)
+            return 0f;
+        if (IsAllowedBiteOverlap(a, b, overlapCount))
+            return 0f;
+        return overlapCount;
+    }
+
+    private float IntersectionPenalty(RoomPlacement a, RoomPlacement b)
+    {
+        if (a == null || b == null)
+            return 0f;
+
+        return IntersectionPenaltyFast(a, b);
+    }
+
+    private float IntersectionPenaltyFast(RoomPlacement a, RoomPlacement b)
+    {
+        if (a?.Shape == null || b?.Shape == null)
+            return 0f;
+
+        var aFloor = a.Shape.FloorCells;
+        var bFloor = b.Shape.FloorCells;
+        var aWall = a.Shape.WallCells;
+        var bWall = b.Shape.WallCells;
+        if (aFloor == null || bFloor == null || aWall == null || bWall == null)
+            return 0f;
+
+        var penalty = 0f;
+
+        // Delta from A-local to B-local overlap checks.
+        var deltaBA = b.Root - a.Root;
+
+        // Floor↔floor overlaps (except allowed bite).
+        var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedWorld: null, fixedRoot: a.Root, out var lastFloorOverlapCellWorld, earlyStopAtTwo: false);
+        var allowedBite = floorOverlapCount == 1 && IsAllowedBiteOverlap(a, b, 1);
+        if (floorOverlapCount > 0 && !allowedBite)
+            penalty += floorOverlapCount;
+
+        // Wall↔floor overlaps (except allowed bite cell / carve-mask).
+        var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, lastFloorOverlapCellWorld) : null;
+        var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, lastFloorOverlapCellWorld) : null;
+
+        // aWalls vs bFloors
+        penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedA, a.Root, out _, earlyStopAtTwo: false);
+
+        // bWalls vs aFloors: invert delta (A relative to B)
+        var deltaAB = a.Root - b.Root;
+        penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedB, b.Root, out _, earlyStopAtTwo: false);
+
+        return penalty;
+    }
+
+    private int CountOverlapShifted(
+        HashSet<Vector2Int> fixedLocal,
+        HashSet<Vector2Int> movingLocal,
+        Vector2Int deltaMovingMinusFixed,
+        HashSet<Vector2Int> allowedWorld,
+        Vector2Int fixedRoot,
+        out Vector2Int lastOverlapWorld,
+        bool earlyStopAtTwo)
+    {
+        lastOverlapWorld = default;
+        if (fixedLocal == null || movingLocal == null || fixedLocal.Count == 0 || movingLocal.Count == 0)
+            return 0;
+
+        var count = 0;
+        foreach (var c in movingLocal)
+        {
+            var fixedCell = c + deltaMovingMinusFixed;
+            if (!fixedLocal.Contains(fixedCell))
+                continue;
+
+            var world = fixedRoot + fixedCell;
+            if (allowedWorld != null && allowedWorld.Contains(world))
+                continue;
+
+            count++;
+            lastOverlapWorld = world;
+            if (earlyStopAtTwo && count > 1)
+                return count;
+        }
+        return count;
+    }
+
+    private Vector2 CenterOf(RoomPlacement p)
+    {
+        if (p?.Shape?.FloorCells == null || p.Shape.FloorCells.Count == 0)
+            return p?.Root ?? Vector2.zero;
+        var sum = Vector2.zero;
+        foreach (var c in p.Shape.FloorCells)
+            sum += (Vector2)(c + p.Root);
+        return sum / p.Shape.FloorCells.Count;
+    }
+}

@@ -5,13 +5,19 @@ using UnityEngine;
 
 public sealed partial class MapGraphLayoutGenerator
 {
-    private List<Vector2Int> FindPositionCandidates(string nodeId, GameObject prefab, ModuleShape shape, Dictionary<string, RoomPlacement> placed, bool allowExistingRoot = false)
-    {
-        var result = new List<Vector2Int>();
-        if (shape == null || prefab == null)
-            return result;
+    private readonly List<(RoomPlacement placement, ConfigurationSpace space)> neighborRootsScratch = new();
+    private readonly List<Vector2Int> candidatesScratch = new();
+    private readonly Dictionary<Vector2Int, int> scoredScratch = new();
+    private readonly List<string> neighborIdsScratch = new();
 
-        var neighborRoots = new List<(RoomPlacement placement, ConfigurationSpace space)>();
+    private void FindPositionCandidates(string nodeId, GameObject prefab, ModuleShape shape, Dictionary<string, RoomPlacement> placed, List<Vector2Int> result, bool allowExistingRoot = false)
+    {
+        var start = profiling != null ? NowTicks() : 0;
+        result?.Clear();
+        if (shape == null || prefab == null)
+            return;
+
+        neighborRootsScratch.Clear();
         foreach (var edge in graphAsset.GetEdgesFor(nodeId))
         {
             var otherId = edge.fromNodeId == nodeId ? edge.toNodeId : edge.fromNodeId;
@@ -23,19 +29,19 @@ public sealed partial class MapGraphLayoutGenerator
                 continue;
             if (space == null || space.IsEmpty)
                 continue;
-            neighborRoots.Add((neighbor, space));
+            neighborRootsScratch.Add((neighbor, space));
         }
 
-        if (neighborRoots.Count == 0)
+        if (neighborRootsScratch.Count == 0)
         {
             if (allowExistingRoot && placed.TryGetValue(nodeId, out var existing))
-                result.Add(existing.Root);
+                result?.Add(existing.Root);
 
-            if (result.Count == 0)
+            if (result == null || result.Count == 0)
             {
                 if (placed.Count == 0)
                 {
-                    result.Add(Vector2Int.zero);
+                    result?.Add(Vector2Int.zero);
                 }
                 else
                 {
@@ -49,73 +55,94 @@ public sealed partial class MapGraphLayoutGenerator
                             {
                                 if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r)
                                     continue;
-                                result.Add(new Vector2Int(dx * spacing, dy * spacing));
-                                if (result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                                result?.Add(new Vector2Int(dx * spacing, dy * spacing));
+                                if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                                     break;
                             }
-                            if (result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                            if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                                 break;
                         }
-                        if (result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                        if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                             break;
                     }
                 }
             }
-            return result;
+            return;
         }
 
-        var baseNeighbor = neighborRoots[0];
-        var candidates = baseNeighbor.space.Offsets
-            .Select(off => baseNeighbor.placement.Root + off)
-            .ToList();
+        var baseNeighbor = neighborRootsScratch[0];
+        candidatesScratch.Clear();
+        foreach (var off in baseNeighbor.space.Offsets)
+            candidatesScratch.Add(baseNeighbor.placement.Root + off);
 
-        var totalOffsets = candidates.Count;
+        var totalOffsets = candidatesScratch.Count;
 
-        for (int i = 1; i < neighborRoots.Count; i++)
+        for (int i = 1; i < neighborRootsScratch.Count; i++)
         {
-            var next = neighborRoots[i];
-            candidates = candidates
-                .Where(pos => next.space.Contains(pos - next.placement.Root))
-                .ToList();
-            if (candidates.Count == 0)
+            var next = neighborRootsScratch[i];
+            var write = 0;
+            for (int read = 0; read < candidatesScratch.Count; read++)
+            {
+                var pos = candidatesScratch[read];
+                if (next.space.Contains(pos - next.placement.Root))
+                    candidatesScratch[write++] = pos;
+            }
+            if (write < candidatesScratch.Count)
+                candidatesScratch.RemoveRange(write, candidatesScratch.Count - write);
+            if (candidatesScratch.Count == 0)
                 break;
         }
 
-        foreach (var pos in candidates)
-            result.Add(pos);
+        if (result != null)
+            result.AddRange(candidatesScratch);
 
-        if (result.Count == 0)
+        if (result == null || result.Count == 0)
         {
-            var scored = new Dictionary<Vector2Int, int>();
-            foreach (var (neighbor, space) in neighborRoots)
+            scoredScratch.Clear();
+            foreach (var (neighbor, space) in neighborRootsScratch)
             {
                 foreach (var off in space.Offsets)
                 {
                     var pos = neighbor.Root + off;
-                    if (!scored.TryGetValue(pos, out var count))
+                    if (!scoredScratch.TryGetValue(pos, out var count))
                         count = 0;
-                    scored[pos] = count + 1;
+                    scoredScratch[pos] = count + 1;
                 }
             }
 
-            var maxSatisfied = scored.Count > 0 ? scored.Values.Max() : 0;
-            foreach (var kv in scored.Where(kv => kv.Value == maxSatisfied).OrderBy(_ => rng.Next()))
+            var maxSatisfied = 0;
+            foreach (var kv in scoredScratch)
+                maxSatisfied = Mathf.Max(maxSatisfied, kv.Value);
+
+            candidatesScratch.Clear();
+            foreach (var kv in scoredScratch)
             {
-                result.Add(kv.Key);
-                if (result.Count >= Mathf.Max(1, settings.MaxFallbackCandidates)) break;
+                if (kv.Value == maxSatisfied)
+                    candidatesScratch.Add(kv.Key);
+            }
+            candidatesScratch.Shuffle(rng);
+
+            var limit = Mathf.Max(1, settings.MaxFallbackCandidates);
+            for (var i = 0; i < candidatesScratch.Count && i < limit; i++)
+            {
+                result?.Add(candidatesScratch[i]);
             }
         }
 
-        if (result.Count == 0 && allowExistingRoot && placed.TryGetValue(nodeId, out var existingPlacement))
-            result.Add(existingPlacement.Root);
+        if ((result == null || result.Count == 0) && allowExistingRoot && placed.TryGetValue(nodeId, out var existingPlacement))
+            result?.Add(existingPlacement.Root);
 
-        if (result.Count == 0)
+        if (result == null || result.Count == 0)
         {
-            var neighborInfo = string.Join("; ", neighborRoots.Select(n => $"{n.placement.NodeId}:{n.space.Offsets.Count}"));
+            var neighborInfo = string.Join("; ", neighborRootsScratch.Select(n => $"{n.placement.NodeId}:{n.space.Offsets.Count}"));
             Debug.LogWarning($"[LayoutGenerator] No position candidates for node {nodeId} prefab {prefab.name}. Offsets before overlap: {totalOffsets}. Neighbors: {neighborInfo}");
         }
 
-        return result;
+        if (profiling != null)
+        {
+            profiling.FindPositionCandidatesCalls++;
+            profiling.FindPositionCandidatesTicks += NowTicks() - start;
+        }
     }
 
     private int EstimateUnconstrainedSpacing(ModuleShape shape)
@@ -144,7 +171,10 @@ public sealed partial class MapGraphLayoutGenerator
         if (candidate == null)
             return true;
 
-        var cells = candidate.WorldCells;
+        var candidateFloor = candidate.Shape?.FloorCells;
+        if (candidateFloor == null || candidateFloor.Count == 0)
+            return true;
+
         foreach (var other in placed.Values)
         {
             if (other == null)
@@ -152,11 +182,16 @@ public sealed partial class MapGraphLayoutGenerator
             if (other.NodeId == candidate.NodeId)
                 continue;
 
-            var overlapCount = CountOverlapCells(cells, other.WorldCells, out _);
-            if (overlapCount == 0)
+            var otherFloor = other.Shape?.FloorCells;
+            if (otherFloor == null || otherFloor.Count == 0)
                 continue;
 
-            if (IsAllowedBiteOverlap(candidate, other, overlapCount))
+            var delta = other.Root - candidate.Root;
+            var overlapCount = CountOverlapShifted(candidateFloor, otherFloor, delta, AllowedWorldCells.None, candidate.Root, out _, earlyStopAtTwo: true);
+            if (overlapCount <= 0)
+                continue;
+
+            if (overlapCount == 1 && IsAllowedBiteOverlap(candidate, other, 1))
                 continue;
 
             return true;
@@ -164,4 +199,3 @@ public sealed partial class MapGraphLayoutGenerator
         return false;
     }
 }
-

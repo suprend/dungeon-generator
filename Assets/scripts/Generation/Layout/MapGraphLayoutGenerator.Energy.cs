@@ -8,6 +8,8 @@ public sealed partial class MapGraphLayoutGenerator
     private const float OverlapWeight = 1000f;
     private const float DistanceWeight = 1f;
 
+    private readonly List<RoomPlacement> roomListScratch = new();
+
     private sealed class EnergyCache
     {
         public float OverlapPenaltySum { get; set; }
@@ -32,12 +34,14 @@ public sealed partial class MapGraphLayoutGenerator
     private float ComputeEnergy(Dictionary<string, RoomPlacement> rooms)
     {
         float overlapArea = 0f;
-        var list = rooms.Values.ToList();
-        for (int i = 0; i < list.Count; i++)
+        roomListScratch.Clear();
+        foreach (var p in rooms.Values)
+            roomListScratch.Add(p);
+        for (int i = 0; i < roomListScratch.Count; i++)
         {
-            for (int j = i + 1; j < list.Count; j++)
+            for (int j = i + 1; j < roomListScratch.Count; j++)
             {
-                overlapArea += IntersectionPenalty(list[i], list[j]);
+                overlapArea += IntersectionPenalty(roomListScratch[i], roomListScratch[j]);
             }
         }
 
@@ -66,13 +70,15 @@ public sealed partial class MapGraphLayoutGenerator
 
         float overlapSum = 0f;
         var pairPenalty = new Dictionary<(string a, string b), float>();
-        var list = rooms.Values.ToList();
-        for (int i = 0; i < list.Count; i++)
+        roomListScratch.Clear();
+        foreach (var p in rooms.Values)
+            roomListScratch.Add(p);
+        for (int i = 0; i < roomListScratch.Count; i++)
         {
-            for (int j = i + 1; j < list.Count; j++)
+            for (int j = i + 1; j < roomListScratch.Count; j++)
             {
-                var a = list[i];
-                var b = list[j];
+                var a = roomListScratch[i];
+                var b = roomListScratch[j];
                 if (a == null || b == null)
                     continue;
                 var key = PairKey(a.NodeId, b.NodeId);
@@ -181,10 +187,16 @@ public sealed partial class MapGraphLayoutGenerator
         if (a == null || b == null)
             return 0f;
 
-        var overlapCount = CountOverlapCells(a.WorldCells, b.WorldCells, out _);
-        if (overlapCount == 0)
+        var aFloor = a.Shape?.FloorCells;
+        var bFloor = b.Shape?.FloorCells;
+        if (aFloor == null || bFloor == null)
             return 0f;
-        if (IsAllowedBiteOverlap(a, b, overlapCount))
+
+        var deltaBA = b.Root - a.Root;
+        var overlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out _, earlyStopAtTwo: false);
+        if (overlapCount <= 0)
+            return 0f;
+        if (overlapCount == 1 && IsAllowedBiteOverlap(a, b, 1))
             return 0f;
         return overlapCount;
     }
@@ -215,14 +227,14 @@ public sealed partial class MapGraphLayoutGenerator
         var deltaBA = b.Root - a.Root;
 
         // Floor↔floor overlaps (except allowed bite).
-        var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedWorld: null, fixedRoot: a.Root, out var lastFloorOverlapCellWorld, earlyStopAtTwo: false);
+        var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var lastFloorOverlapCellWorld, earlyStopAtTwo: false);
         var allowedBite = floorOverlapCount == 1 && IsAllowedBiteOverlap(a, b, 1);
         if (floorOverlapCount > 0 && !allowedBite)
             penalty += floorOverlapCount;
 
         // Wall↔floor overlaps (except allowed bite cell / carve-mask).
-        var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, lastFloorOverlapCellWorld) : null;
-        var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, lastFloorOverlapCellWorld) : null;
+        var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, lastFloorOverlapCellWorld) : AllowedWorldCells.None;
+        var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, lastFloorOverlapCellWorld) : AllowedWorldCells.None;
 
         // aWalls vs bFloors
         penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedA, a.Root, out _, earlyStopAtTwo: false);
@@ -234,37 +246,7 @@ public sealed partial class MapGraphLayoutGenerator
         return penalty;
     }
 
-    private int CountOverlapShifted(
-        HashSet<Vector2Int> fixedLocal,
-        HashSet<Vector2Int> movingLocal,
-        Vector2Int deltaMovingMinusFixed,
-        HashSet<Vector2Int> allowedWorld,
-        Vector2Int fixedRoot,
-        out Vector2Int lastOverlapWorld,
-        bool earlyStopAtTwo)
-    {
-        lastOverlapWorld = default;
-        if (fixedLocal == null || movingLocal == null || fixedLocal.Count == 0 || movingLocal.Count == 0)
-            return 0;
-
-        var count = 0;
-        foreach (var c in movingLocal)
-        {
-            var fixedCell = c + deltaMovingMinusFixed;
-            if (!fixedLocal.Contains(fixedCell))
-                continue;
-
-            var world = fixedRoot + fixedCell;
-            if (allowedWorld != null && allowedWorld.Contains(world))
-                continue;
-
-            count++;
-            lastOverlapWorld = world;
-            if (earlyStopAtTwo && count > 1)
-                return count;
-        }
-        return count;
-    }
+    // CountOverlapShifted is implemented in Validation.cs to share the no-allocation AllowedWorldCells path.
 
     private Vector2 CenterOf(RoomPlacement p)
     {

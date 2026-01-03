@@ -101,18 +101,35 @@ public partial class MapGraphLevelSolver
             var attempts = randomSeed != 0 ? 1 : Mathf.Max(1, layoutAttempts);
             string lastError = null;
 
+            var faceChainStart = Time.realtimeSinceStartup;
+            var prevFaceBuilderDebug = MapGraphFaceBuilder.LogProfiling;
+            var shouldLogFaceProfiling = layoutSettings != null && layoutSettings.LogLayoutProfiling;
+            MapGraphFaceBuilder.SetDebug(shouldLogFaceProfiling);
+            if (!MapGraphFaceBuilder.TryBuildFaces(expandedGraph, out var faces, out error))
+            {
+                MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
+                return false;
+            }
+            if (!MapGraphChainBuilder.TryBuildChains(expandedGraph, faces, out var precomputedChains, out error))
+            {
+                MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
+                return false;
+            }
+            MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
+            var faceChainSecondsShared = Time.realtimeSinceStartup - faceChainStart;
+
             for (int attempt = 0; attempt < attempts; attempt++)
             {
                 var attemptStart = Time.realtimeSinceStartup;
                 float layoutSeconds = 0f;
-                float faceChainSeconds = 0f;
+                float faceChainSeconds = faceChainSecondsShared;
                 float placeSeconds = 0f;
                 float stampSeconds = 0f;
 
                 var attemptSeed = unchecked(baseSeed + attempt);
                 var layoutGenerator = new MapGraphLayoutGenerator(attemptSeed, layoutSettings);
                 var layoutGenStart = Time.realtimeSinceStartup;
-                if (!layoutGenerator.TryGenerate(expandedGraph, stamp, out var layout, out var genError, maxLayoutsPerChain))
+                if (!layoutGenerator.TryGenerate(expandedGraph, stamp, out var layout, out var genError, maxLayoutsPerChain, precomputedChains))
                 {
                     lastError = genError;
                     if (verboseLogs)
@@ -121,14 +138,7 @@ public partial class MapGraphLevelSolver
                 }
                 layoutSeconds = Time.realtimeSinceStartup - layoutGenStart;
 
-                var faceChainStart = Time.realtimeSinceStartup;
-                if (!MapGraphFaceBuilder.TryBuildFaces(expandedGraph, out var faces, out error))
-                    return false;
-                if (!MapGraphChainBuilder.TryBuildChains(expandedGraph, faces, out var chains, out error))
-                    return false;
-                faceChainSeconds = Time.realtimeSinceStartup - faceChainStart;
-
-                var ordered = chains;
+                var ordered = precomputedChains;
                 var rngLocal = new System.Random(attemptSeed);
 
                 var placer = new PlacementState(stamp, rngLocal, nodeAssign, edgeAssign, verboseLogs, startCell, layoutStartTime, maxDurationSeconds, shapeLibrary, configSpaceLibrary);
@@ -145,7 +155,7 @@ public partial class MapGraphLevelSolver
                         var attemptSeconds = Time.realtimeSinceStartup - attemptStart;
                         var totalSeconds = Time.realtimeSinceStartup - totalStartTime;
                         Debug.Log($"[MapGraphLevelSolver] Layout placement attempt {attempt + 1}/{attempts} failed after {attemptSeconds:0.000}s: {lastError}");
-                        Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
+                        Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains(shared)={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
                     }
                     placer.Cleanup();
                     continue;
@@ -162,7 +172,7 @@ public partial class MapGraphLevelSolver
                     var attemptSeconds = Time.realtimeSinceStartup - attemptStart;
                     var totalSeconds = Time.realtimeSinceStartup - totalStartTime;
                     Debug.Log($"[MapGraphLevelSolver] Layout placement completed in {attemptSeconds:0.000}s.");
-                    Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
+                    Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains(shared)={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
                 }
                 return true;
             }

@@ -1,0 +1,20 @@
+# Unity (generated / local)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# IDE / Unity project files (generated)
+*.csproj
+*.sln
+*.user
+*.pidb
+*.booproj
+*.unityproj
+
+# OS / editor noise
+.DS_Store
+.vscode/

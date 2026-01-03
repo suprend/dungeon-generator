@@ -35,6 +35,12 @@ public class GraphMapBuilder : MonoBehaviour
     public int maxFallbackCandidates = 256;
     [Tooltip("How many different random seeds to try if layout generation/placement fails. Used only when randomSeed == 0.")]
     public int layoutAttempts = 1;
+    [Tooltip("Log configuration space (CS) offsets counts for prefab pairs during layout generation.")]
+    public bool logConfigSpaceSizeSummary = false;
+    [Tooltip("How many largest CS pairs to include in the summary log.")]
+    public int maxConfigSpaceSizePairs = 12;
+    [Tooltip("Log layout generator micro-profiling summary (calls + time breakdown).")]
+    public bool logLayoutProfiling = false;
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -70,7 +76,10 @@ public class GraphMapBuilder : MonoBehaviour
             MaxWiggleCandidates = maxWiggleCandidates,
             MaxFallbackCandidates = maxFallbackCandidates,
             VerboseConfigSpaceLogs = verboseConfigSpaceLogs,
-            MaxConfigSpaceLogs = maxConfigSpaceLogs
+            MaxConfigSpaceLogs = maxConfigSpaceLogs,
+            LogConfigSpaceSizeSummary = logConfigSpaceSizeSummary,
+            MaxConfigSpaceSizePairs = maxConfigSpaceSizePairs,
+            LogLayoutProfiling = logLayoutProfiling
         };
 
         if (!solver.TrySolveAndPlace(

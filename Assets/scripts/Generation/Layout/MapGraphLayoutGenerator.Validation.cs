@@ -6,6 +6,42 @@ using UnityEngine;
 
 public sealed partial class MapGraphLayoutGenerator
 {
+    private readonly struct AllowedWorldCells
+    {
+        public static AllowedWorldCells None => default;
+        private readonly byte count;
+        private readonly Vector2Int a;
+        private readonly Vector2Int b;
+        private readonly Vector2Int c;
+
+        public AllowedWorldCells(Vector2Int one)
+        {
+            count = 1;
+            a = one;
+            b = default;
+            c = default;
+        }
+
+        public AllowedWorldCells(Vector2Int one, Vector2Int two, Vector2Int three)
+        {
+            count = 3;
+            a = one;
+            b = two;
+            c = three;
+        }
+
+        public bool Contains(Vector2Int cell)
+        {
+            if (count == 0)
+                return false;
+            if (cell == a)
+                return true;
+            if (count == 1)
+                return false;
+            return cell == b || cell == c;
+        }
+    }
+
     private bool TryValidateGlobal(Dictionary<string, RoomPlacement> rooms, out string error)
     {
         error = null;
@@ -67,22 +103,35 @@ public sealed partial class MapGraphLayoutGenerator
                 if (a == null || b == null)
                     continue;
 
-                var overlapCount = CountOverlapCells(a.WorldCells, b.WorldCells, out var overlapCell);
-                var allowedBite = overlapCount == 1 && IsAllowedBiteOverlap(a, b, overlapCount);
-                if (overlapCount > 0 && !allowedBite)
+                var aFloor = a.Shape?.FloorCells;
+                var bFloor = b.Shape?.FloorCells;
+                var aWall = a.Shape?.WallCells;
+                var bWall = b.Shape?.WallCells;
+                if (aFloor == null || bFloor == null || aWall == null || bWall == null)
+                    continue;
+
+                var deltaBA = b.Root - a.Root;
+                var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var overlapCellWorld, earlyStopAtTwo: true);
+                var allowedBite = floorOverlapCount == 1 && IsAllowedBiteOverlap(a, b, 1);
+                if (floorOverlapCount > 0 && !allowedBite)
                 {
-                    error = $"Layout invalid: floor overlap between {a.NodeId} and {b.NodeId} (count={overlapCount}, cell={overlapCell}).";
+                    error = $"Layout invalid: floor overlap between {a.NodeId} and {b.NodeId} (count={floorOverlapCount}, cell={overlapCellWorld}).";
                     return false;
                 }
 
-                var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, overlapCell) : null;
-                var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, overlapCell) : null;
-                if (TryFindIllegalOverlap(a.WorldWallCells, b.WorldCells, allowedA, out var badA))
+                var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, overlapCellWorld) : AllowedWorldCells.None;
+                var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, overlapCellWorld) : AllowedWorldCells.None;
+
+                var wallOnFloorA = CountOverlapShifted(aWall, bFloor, deltaBA, allowedA, a.Root, out var badA, earlyStopAtTwo: true);
+                if (wallOnFloorA > 0)
                 {
                     error = $"Layout invalid: wall({a.NodeId}) overlaps floor({b.NodeId}) at {badA}.";
                     return false;
                 }
-                if (TryFindIllegalOverlap(b.WorldWallCells, a.WorldCells, allowedB, out var badB))
+
+                var deltaAB = a.Root - b.Root;
+                var wallOnFloorB = CountOverlapShifted(bWall, aFloor, deltaAB, allowedB, b.Root, out var badB, earlyStopAtTwo: true);
+                if (wallOnFloorB > 0)
                 {
                     error = $"Layout invalid: wall({b.NodeId}) overlaps floor({a.NodeId}) at {badB}.";
                     return false;
@@ -110,10 +159,16 @@ public sealed partial class MapGraphLayoutGenerator
                 return false;
             }
 
-            var overlapCount = CountOverlapCells(a.WorldCells, b.WorldCells, out var overlapCell);
+            var aFloor = a.Shape?.FloorCells;
+            var bFloor = b.Shape?.FloorCells;
+            if (aFloor == null || bFloor == null)
+                continue;
+
+            var deltaBA = b.Root - a.Root;
+            var overlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var overlapCellWorld, earlyStopAtTwo: false);
             if (overlapCount != 1)
             {
-                error = $"Layout invalid: edge {edge.fromNodeId}->{edge.toNodeId} expected 1-tile bite, got overlapCount={overlapCount} (cell={overlapCell}).";
+                error = $"Layout invalid: edge {edge.fromNodeId}->{edge.toNodeId} expected 1-tile bite, got overlapCount={overlapCount} (cell={overlapCellWorld}).";
                 return false;
             }
         }
@@ -121,42 +176,33 @@ public sealed partial class MapGraphLayoutGenerator
         return true;
     }
 
-    private bool TryFindIllegalOverlap(HashSet<Vector2Int> walls, HashSet<Vector2Int> floors, HashSet<Vector2Int> allowedCells, out Vector2Int badCell)
+    private int CountOverlapShifted(
+        HashSet<Vector2Int> fixedLocal,
+        HashSet<Vector2Int> movingLocal,
+        Vector2Int deltaMovingMinusFixed,
+        AllowedWorldCells allowedWorld,
+        Vector2Int fixedRoot,
+        out Vector2Int lastOverlapWorld,
+        bool earlyStopAtTwo)
     {
-        badCell = default;
-        if (walls == null || floors == null || walls.Count == 0 || floors.Count == 0)
-            return false;
-
-        var iter = walls.Count <= floors.Count ? walls : floors;
-        var other = ReferenceEquals(iter, walls) ? floors : walls;
-        foreach (var c in iter)
-        {
-            if (!other.Contains(c))
-                continue;
-            if (allowedCells != null && allowedCells.Contains(c))
-                continue;
-            badCell = c;
-            return true;
-        }
-        return false;
-    }
-
-    private int CountOverlapCells(HashSet<Vector2Int> a, HashSet<Vector2Int> b, out Vector2Int overlapCell)
-    {
-        overlapCell = default;
-        if (a == null || b == null || a.Count == 0 || b.Count == 0)
+        lastOverlapWorld = default;
+        if (fixedLocal == null || movingLocal == null || fixedLocal.Count == 0 || movingLocal.Count == 0)
             return 0;
 
         var count = 0;
-        var iter = a.Count <= b.Count ? a : b;
-        var other = ReferenceEquals(iter, a) ? b : a;
-        foreach (var c in iter)
+        foreach (var c in movingLocal)
         {
-            if (!other.Contains(c))
+            var fixedCell = c + deltaMovingMinusFixed;
+            if (!fixedLocal.Contains(fixedCell))
                 continue;
+
+            var world = fixedRoot + fixedCell;
+            if (allowedWorld.Contains(world))
+                continue;
+
             count++;
-            overlapCell = c;
-            if (count > 1)
+            lastOverlapWorld = world;
+            if (earlyStopAtTwo && count > 1)
                 return count;
         }
         return count;
@@ -194,7 +240,14 @@ public sealed partial class MapGraphLayoutGenerator
 
     private bool IsValidLayout(Dictionary<string, RoomPlacement> rooms)
     {
-        return TryValidateLayout(rooms, out _);
+        var start = profiling != null ? NowTicks() : 0;
+        var ok = TryValidateLayout(rooms, out _);
+        if (profiling != null)
+        {
+            profiling.IsValidLayoutCalls++;
+            profiling.IsValidLayoutTicks += NowTicks() - start;
+        }
+        return ok;
     }
 
     private bool IsGloballyValid(Dictionary<string, RoomPlacement> rooms)
@@ -217,15 +270,13 @@ public sealed partial class MapGraphLayoutGenerator
         return space != null && space.Contains(delta);
     }
 
-    private HashSet<Vector2Int> AllowedWallOnFloorCells(RoomPlacement wallOwner, RoomPlacement floorOwner, Vector2Int biteCell)
+    private AllowedWorldCells AllowedWallOnFloorCells(RoomPlacement wallOwner, RoomPlacement floorOwner, Vector2Int biteCell)
     {
         if (wallOwner == null || floorOwner == null)
-            return null;
-
-        var allowed = new HashSet<Vector2Int> { biteCell };
+            return AllowedWorldCells.None;
 
         if (!IsConnector(wallOwner.Prefab) || IsConnector(floorOwner.Prefab))
-            return allowed;
+            return new AllowedWorldCells(biteCell);
 
         if (!TryGetSocketSideAtWorldCell(wallOwner, biteCell, out var side) &&
             !TryGetSocketSideAtWorldCell(floorOwner, biteCell, out side))
@@ -235,9 +286,7 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         var tangent = side == DoorSide.North || side == DoorSide.South ? Vector2Int.right : Vector2Int.up;
-        allowed.Add(biteCell + tangent);
-        allowed.Add(biteCell - tangent);
-        return allowed;
+        return new AllowedWorldCells(biteCell, biteCell + tangent, biteCell - tangent);
     }
 
     private bool TryGetSocketSideAtWorldCell(RoomPlacement placement, Vector2Int worldCell, out DoorSide side)
@@ -296,4 +345,3 @@ public sealed partial class MapGraphLayoutGenerator
         return count;
     }
 }
-

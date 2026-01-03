@@ -13,19 +13,38 @@ MonoBehaviour:
   m_Name: TestGraph
   m_EditorClassIdentifier: 
   nodes:
-  - id: db753c7217524c88b3e2d8dd9b034824
+  - id: 1daccb4e50d349ca834a4174236e850c
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 245, y: 105}
-  - id: c4ac05fd943e4d3c8079613f6dc7b61d
+    position: {x: 229.84694, y: 113.590225}
+  - id: e13949eb98f04bd3a795ca596153e8ac
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 226, y: 262}
+    position: {x: 377.30005, y: 111.05002}
+  - id: c4e1c3e4a02c44598e68007e0c77e3b7
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 233.44438, y: -33.71113}
+  - id: 725171b0b0984b3c851af0e00bf67f8d
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 389.1492, y: -30.49998}
   edges:
-  - fromNodeId: db753c7217524c88b3e2d8dd9b034824
-    toNodeId: c4ac05fd943e4d3c8079613f6dc7b61d
+  - fromNodeId: e13949eb98f04bd3a795ca596153e8ac
+    toNodeId: 1daccb4e50d349ca834a4174236e850c
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 1daccb4e50d349ca834a4174236e850c
+    toNodeId: c4e1c3e4a02c44598e68007e0c77e3b7
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: c4e1c3e4a02c44598e68007e0c77e3b7
+    toNodeId: 725171b0b0984b3c851af0e00bf67f8d
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: e13949eb98f04bd3a795ca596153e8ac
+    toNodeId: 725171b0b0984b3c851af0e00bf67f8d
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
   defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

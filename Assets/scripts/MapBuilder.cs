@@ -335,7 +335,7 @@ public class MapBuilder : MonoBehaviour
         return socket && socket.Side == side && NormalizeWidth(socket.Width) == NormalizeWidth(width);
     }
 
-    static int NormalizeWidth(int width) => Mathf.Max(1, width);
+    static int NormalizeWidth(int width) => 1;
 
     // Shuffling is delegated to CollectionExtensions
 }

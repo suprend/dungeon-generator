@@ -58,6 +58,10 @@ public sealed class ShapeLibrary
         foreach (var c in stamp.CollectModuleWallCells(meta))
             wallCells.Add(new Vector2Int(c.x - rootCell.x, c.y - rootCell.y));
 
+        // Many prefabs paint "floor" tiles under walls for visuals. For layout/overlap purposes,
+        // treat any cell that has a wall tile as non-floor, except the socket bite cell(s).
+        floorCells.ExceptWith(wallCells);
+
         var sockets = new List<ShapeSocket>();
         if (meta.Sockets != null)
         {
@@ -66,6 +70,10 @@ public sealed class ShapeLibrary
                 if (sock == null) continue;
                 var sockCell = stamp.CellFromWorld(sock.transform.position);
                 var localCell = new Vector2Int(sockCell.x - rootCell.x, sockCell.y - rootCell.y);
+                // Strict "1-tile bite" uses overlap on the socket cell.
+                // Rooms often have a wall tile at the socket location (door is carved later),
+                // so treat the socket cell as solid/floor for configuration space purposes.
+                floorCells.Add(localCell);
                 var contact = BuildContactStrip(localCell, sock.Side, sock.Width);
                 sockets.Add(new ShapeSocket(sock.Side, sock.Width, localCell, contact));
             }
@@ -87,17 +95,8 @@ public sealed class ShapeLibrary
     private HashSet<Vector2Int> BuildContactStrip(Vector2Int socketCell, DoorSide side, int width)
     {
         var res = new HashSet<Vector2Int>();
-        // Include the socket cell itself
+        // Strict 1-tile bite: only the socket cell itself can overlap.
         res.Add(socketCell);
-        int k = Mathf.Max(1, width);
-        int half = k / 2;
-        var axis = side.PerpendicularAxis();
-        var forward = side.Forward();
-        for (int offset = -half; offset <= half; offset++)
-        {
-            var cell = socketCell + new Vector2Int(axis.x, axis.y) * offset + forward;
-            res.Add(cell);
-        }
         return res;
     }
 }

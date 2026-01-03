@@ -7,7 +7,11 @@ public enum DoorSide { North = 0, East = 1, South = 2, West = 3 }
 public class DoorSocket : MonoBehaviour
 {
     public DoorSide Side;
-    [Tooltip("Ширина проёма в тайлах (рекомендуется нечётная, напр. 3)")]
-    public int Width = 3;
-}
+    [Tooltip("Пока что ширина проёма не поддерживается; всегда 1 тайл.")]
+    public int Width = 1;
 
+    private void OnValidate()
+    {
+        Width = 1;
+    }
+}

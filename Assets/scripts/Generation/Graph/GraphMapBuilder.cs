@@ -25,6 +25,20 @@ public class GraphMapBuilder : MonoBehaviour
     [Tooltip("Destroy placed prefab instances after stamping (keeps only tiles).")]
     public bool destroyPlacedInstances = true;
 
+    [Header("Layout Generator (SA)")]
+    public int maxLayoutsPerChain = 8;
+    public int temperatureSteps = 24;
+    public int innerIterations = 128;
+    [Range(0.01f, 0.999f)]
+    public float cooling = 0.65f;
+    public int maxWiggleCandidates = 16;
+    public int maxFallbackCandidates = 256;
+    [Tooltip("How many different random seeds to try if layout generation/placement fails. Used only when randomSeed == 0.")]
+    public int layoutAttempts = 1;
+    [Header("Debug")]
+    public bool verboseConfigSpaceLogs = false;
+    public int maxConfigSpaceLogs = 64;
+
     private void Awake()
     {
         if (runOnStart)
@@ -47,7 +61,32 @@ public class GraphMapBuilder : MonoBehaviour
 
         var solver = new MapGraphLevelSolver(graph);
         Vector3Int? startCell = targetGrid != null ? targetGrid.WorldToCell(transform.position) : null;
-        if (!solver.TrySolveAndPlace(targetGrid, floorMap, wallMap, clearOnRun, randomSeed, verboseLogs, startCell, out var error, placementTimeLimitSeconds, destroyPlacedInstances))
+        var settings = new MapGraphLayoutGenerator.Settings
+        {
+            MaxLayoutsPerChain = maxLayoutsPerChain,
+            TemperatureSteps = temperatureSteps,
+            InnerIterations = innerIterations,
+            Cooling = cooling,
+            MaxWiggleCandidates = maxWiggleCandidates,
+            MaxFallbackCandidates = maxFallbackCandidates,
+            VerboseConfigSpaceLogs = verboseConfigSpaceLogs,
+            MaxConfigSpaceLogs = maxConfigSpaceLogs
+        };
+
+        if (!solver.TrySolveAndPlace(
+                targetGrid,
+                floorMap,
+                wallMap,
+                clearOnRun,
+                randomSeed,
+                verboseLogs,
+                startCell,
+                out var error,
+                placementTimeLimitSeconds,
+                destroyPlacedInstances,
+                settings,
+                maxLayoutsPerChain,
+                layoutAttempts))
         {
             Debug.LogError($"[GraphMapBuilder] Generation failed: {error}");
         }

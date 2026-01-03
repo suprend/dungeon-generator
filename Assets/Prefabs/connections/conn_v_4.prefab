@@ -259,7 +259,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Side: 0
-  Width: 3
+  Width: 1
 --- !u!1 &4166020637758326076
 GameObject:
   m_ObjectHideFlags: 0
@@ -305,7 +305,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Side: 2
-  Width: 3
+  Width: 1
 --- !u!1 &5468975179379841696
 GameObject:
   m_ObjectHideFlags: 0
@@ -541,6 +541,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5456895fc9a6544ed9362e95ea6b7980, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  AutoCollectSockets: 1
   Sockets:
   - {fileID: 8086514980052357684}
   - {fileID: 7630293557346395765}

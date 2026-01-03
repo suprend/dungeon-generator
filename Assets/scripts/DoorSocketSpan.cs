@@ -1,0 +1,239 @@
+using UnityEngine;
+using UnityEngine.Tilemaps;
+using System.Collections.Generic;
+
+/// <summary>
+/// Authoring helper: defines a discrete span of sockets along a wall.
+/// It auto-generates child DoorSocket points at +/- Radius tiles from this marker along the wall tangent.
+/// </summary>
+[ExecuteAlways]
+public sealed class DoorSocketSpan : MonoBehaviour
+{
+    public DoorSide Side;
+
+    [Min(0)]
+    [Tooltip("How many tiles to extend from this marker along the wall (tangent). 0 = single socket.")]
+    public int Radius = 0;
+
+    [Tooltip("When enabled, sockets are generated/kept in sync automatically.")]
+    public bool AutoGenerate = true;
+
+    private const string AutoPrefix = "__AutoDoorSocket_";
+
+    [ContextMenu("Clear Generated Sockets")]
+    public void ClearGenerated()
+    {
+        ClearAutoSockets();
+    }
+
+    [ContextMenu("Regenerate Sockets Now")]
+    public void RegenerateNow()
+    {
+        if (!AutoGenerate) return;
+        Radius = Mathf.Max(0, Radius);
+        Regenerate(2 * Radius + 1);
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!enabled) return;
+        if (!AutoGenerate) return;
+        DrawGizmos(selected: false);
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!enabled) return;
+        DrawGizmos(selected: true);
+    }
+
+    private void OnEnable()
+    {
+        EnsureGenerated();
+    }
+
+    private void OnValidate()
+    {
+        if (!AutoGenerate)
+            return;
+        Radius = Mathf.Max(0, Radius);
+        EnsureGenerated();
+    }
+
+    public void EnsureGenerated()
+    {
+        if (!AutoGenerate)
+            return;
+
+        var expected = 2 * Mathf.Max(0, Radius) + 1;
+        var (stepX, stepY) = GetLocalCellSteps();
+        var tangent = (Side == DoorSide.North || Side == DoorSide.South) ? stepX : stepY;
+        if (tangent == Vector3.zero)
+            tangent = (Side == DoorSide.North || Side == DoorSide.South) ? Vector3.right : Vector3.up;
+
+        if (IsUpToDate(expected, tangent))
+            return;
+
+        Regenerate(expected);
+    }
+
+    private List<DoorSocket> GetAutoSockets()
+    {
+        var result = new List<DoorSocket>();
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            var child = transform.GetChild(i);
+            if (child == null) continue;
+            if (!child.name.StartsWith(AutoPrefix)) continue;
+            var sock = child.GetComponent<DoorSocket>();
+            if (sock != null) result.Add(sock);
+        }
+        return result;
+    }
+
+    private bool IsUpToDate(int expected, Vector3 tangent)
+    {
+        var radius = Mathf.Max(0, Radius);
+        var seen = new HashSet<string>();
+        var eps = 0.001f;
+
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            var child = transform.GetChild(i);
+            if (child == null) continue;
+            if (!child.name.StartsWith(AutoPrefix)) continue;
+
+            if (!seen.Add(child.name))
+                return false;
+
+            if (!child.name.StartsWith($"{AutoPrefix}{Side}_"))
+                return false;
+
+            var sock = child.GetComponent<DoorSocket>();
+            if (sock == null)
+                return false;
+            if (sock.Side != Side)
+                return false;
+            if (sock.Width != 1)
+                return false;
+        }
+
+        if (seen.Count != expected)
+            return false;
+
+        for (int i = -radius; i <= radius; i++)
+        {
+            var expectedName = $"{AutoPrefix}{Side}_{i + radius}";
+            var found = transform.Find(expectedName);
+            if (found == null)
+                return false;
+            var expectedPos = tangent * i;
+            if ((found.localPosition - expectedPos).sqrMagnitude > eps * eps)
+                return false;
+        }
+
+        return true;
+    }
+
+    private void ClearAutoSockets()
+    {
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            var child = transform.GetChild(i);
+            if (child == null) continue;
+            if (!child.name.StartsWith(AutoPrefix)) continue;
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                DestroyImmediate(child.gameObject);
+            else
+#endif
+                Destroy(child.gameObject);
+        }
+    }
+
+    private void Regenerate(int expected)
+    {
+        // Remove old generated sockets.
+        ClearAutoSockets();
+
+        var (stepX, stepY) = GetLocalCellSteps();
+        var tangent = (Side == DoorSide.North || Side == DoorSide.South) ? stepX : stepY;
+        if (tangent == Vector3.zero)
+            tangent = (Side == DoorSide.North || Side == DoorSide.South) ? Vector3.right : Vector3.up;
+
+        var radius = Mathf.Max(0, Radius);
+        for (int i = -radius; i <= radius; i++)
+        {
+            var go = new GameObject($"{AutoPrefix}{Side}_{i + radius}");
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = tangent * i;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+
+            var sock = go.AddComponent<DoorSocket>();
+            sock.Side = Side;
+            sock.Width = 1;
+        }
+    }
+
+    private (Vector3 stepX, Vector3 stepY) GetLocalCellSteps()
+    {
+        // Try to infer tile size from a Tilemap inside the prefab/module.
+        var tilemap = GetComponentInParent<Tilemap>();
+        if (tilemap == null)
+            tilemap = GetComponentInChildren<Tilemap>();
+
+        if (tilemap == null)
+            return (Vector3.right, Vector3.up);
+
+        var worldDx = tilemap.GetCellCenterWorld(Vector3Int.right) - tilemap.GetCellCenterWorld(Vector3Int.zero);
+        var worldDy = tilemap.GetCellCenterWorld(Vector3Int.up) - tilemap.GetCellCenterWorld(Vector3Int.zero);
+        var localDx = transform.InverseTransformVector(worldDx);
+        var localDy = transform.InverseTransformVector(worldDy);
+
+        if (localDx == Vector3.zero) localDx = Vector3.right;
+        if (localDy == Vector3.zero) localDy = Vector3.up;
+        return (localDx, localDy);
+    }
+
+    private void DrawGizmos(bool selected)
+    {
+        var radius = Mathf.Max(0, Radius);
+        var (stepX, stepY) = GetLocalCellSteps();
+        var tangent = (Side == DoorSide.North || Side == DoorSide.South) ? stepX : stepY;
+        if (tangent == Vector3.zero)
+            tangent = (Side == DoorSide.North || Side == DoorSide.South) ? Vector3.right : Vector3.up;
+
+        Vector3 normal = Side switch
+        {
+            DoorSide.North => stepY,
+            DoorSide.South => -stepY,
+            DoorSide.East => stepX,
+            DoorSide.West => -stepX,
+            _ => stepY
+        };
+        if (normal == Vector3.zero)
+            normal = Vector3.up;
+
+        var p0 = transform.position;
+        var pStart = transform.TransformPoint(-tangent * radius);
+        var pEnd = transform.TransformPoint(tangent * radius);
+
+        Gizmos.color = selected ? new Color(0.2f, 1f, 0.6f, 0.9f) : new Color(0.2f, 1f, 0.6f, 0.35f);
+        Gizmos.DrawLine(pStart, pEnd);
+
+        // Outward direction hint.
+        Gizmos.color = selected ? new Color(0.9f, 0.9f, 0.2f, 0.9f) : new Color(0.9f, 0.9f, 0.2f, 0.35f);
+        Gizmos.DrawLine(p0, transform.TransformPoint(normal * 0.75f));
+
+        // Discrete candidate points.
+        Gizmos.color = selected ? new Color(0.2f, 0.8f, 1f, 0.95f) : new Color(0.2f, 0.8f, 1f, 0.4f);
+        var baseSize = 0.08f;
+        var size = selected ? baseSize * 1.2f : baseSize;
+        for (int i = -radius; i <= radius; i++)
+        {
+            var wp = transform.TransformPoint(tangent * i);
+            Gizmos.DrawSphere(wp, size);
+        }
+    }
+}

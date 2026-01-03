@@ -40,12 +40,7 @@ public class PlacementValidator
 
     public HashSet<Vector3Int> AllowedWidthStrip(Vector3Int anchorCell, DoorSide side, int width)
     {
-        var res = new HashSet<Vector3Int>();
-        int k = Mathf.Max(1, width);
-        int half = k / 2;
-        var perp = side.PerpendicularAxis();
-        for (int w = -half; w <= half; w++)
-            res.Add(anchorCell + perp * w);
-        return res;
+        // Width is currently not supported; allow only the socket cell itself.
+        return new HashSet<Vector3Int> { anchorCell };
     }
 }

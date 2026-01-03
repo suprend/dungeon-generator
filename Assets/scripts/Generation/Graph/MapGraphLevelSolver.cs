@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -10,8 +11,8 @@ using UnityEngine.Tilemaps;
 /// </summary>
 public class MapGraphLevelSolver
 {
-    private readonly MapGraphAsset graphAsset;
-    private readonly List<MapGraphFaceBuilder.Face> orderedFaces = new();
+    private MapGraphAsset graphAsset;
+    private readonly List<MapGraphChainBuilder.Chain> orderedChains = new();
     private readonly AssignmentState state = new();
     private readonly System.Random rng = new();
     private ShapeLibrary shapeLibrary;
@@ -20,14 +21,6 @@ public class MapGraphLevelSolver
     public MapGraphLevelSolver(MapGraphAsset graphAsset)
     {
         this.graphAsset = graphAsset;
-    }
-
-    private static bool IsSimpleCycle(MapGraphFaceBuilder.Face face)
-    {
-        if (face == null || face.Nodes == null || face.Edges == null)
-            return false;
-        var distinctCount = face.Nodes.Select(n => n?.id).Where(id => !string.IsNullOrEmpty(id)).Distinct().Count();
-        return distinctCount == face.Nodes.Count && face.Edges.Count == face.Nodes.Count;
     }
 
     public bool TrySolve(out IReadOnlyDictionary<string, RoomTypeAsset> nodeAssignments, out IReadOnlyDictionary<(string,string), ConnectionTypeAsset> edgeAssignments, out string error)
@@ -41,16 +34,17 @@ public class MapGraphLevelSolver
             return false;
         }
 
+        
         if (!MapGraphFaceBuilder.TryBuildFaces(graphAsset, out var faces, out error))
             return false;
+        if (!MapGraphChainBuilder.TryBuildChains(graphAsset, faces, out var chains, out error))
+            return false;
 
-        orderedFaces.Clear();
-        orderedFaces.AddRange(faces
-            .OrderByDescending(IsSimpleCycle)   // cycles first
-            .ThenBy(f => f.Nodes.Count));       // then by size
+        orderedChains.Clear();
+        orderedChains.AddRange(chains);
         state.Clear();
 
-        if (!TrySolveFace(0))
+        if (!TrySolveChain(0))
         {
             error = "Unable to place rooms for provided graph.";
             return false;
@@ -62,6 +56,41 @@ public class MapGraphLevelSolver
     }
 
     /// <summary>
+    /// Generates a high-level room layout (positions + chosen prefabs) using configuration spaces and simulated annealing.
+    /// </summary>
+    public bool TryGenerateLayout(
+        Grid targetGrid,
+        Tilemap floorMap,
+        Tilemap wallMap,
+        int randomSeed,
+        out MapGraphLayoutGenerator.LayoutResult layout,
+        out string error,
+        MapGraphLayoutGenerator.Settings layoutSettings = null,
+        int? maxLayoutsPerChain = null)
+    {
+        layout = null;
+        error = null;
+        if (graphAsset == null)
+        {
+            error = "Graph asset is null.";
+            return false;
+        }
+        if (targetGrid == null || floorMap == null)
+        {
+            error = "Target grid and floor map are required for layout generation.";
+            return false;
+        }
+
+        var stamp = new TileStampService(targetGrid, floorMap, wallMap);
+        var originalGraph = graphAsset;
+        var expandedGraph = BuildCorridorGraph(graphAsset);
+        var generator = new MapGraphLayoutGenerator(randomSeed, layoutSettings);
+        var ok = generator.TryGenerate(expandedGraph, stamp, out layout, out error, maxLayoutsPerChain);
+        graphAsset = originalGraph;
+        return ok;
+    }
+
+    /// <summary>
     /// Solves and immediately places prefabs with full backtracking. Result is stamped into provided tilemaps.
     /// </summary>
     public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, out string error, float maxDurationSeconds = 5f, bool destroyPlacedInstances = true)
@@ -70,10 +99,173 @@ public class MapGraphLevelSolver
     }
 
     /// <summary>
+    /// Uses the new layout generator (configuration spaces + simulated annealing) to produce a layout
+    /// and then stamps it into the tilemaps. Falls back to connector placement between already placed rooms.
+    /// </summary>
+    public bool TrySolveAndPlaceWithLayout(
+        Grid targetGrid,
+        Tilemap floorMap,
+        Tilemap wallMap,
+        bool clearMaps,
+        int randomSeed,
+        bool verboseLogs,
+        Vector3Int? startCell,
+        out string error,
+        float maxDurationSeconds = 5f,
+        bool destroyPlacedInstances = true,
+        MapGraphLayoutGenerator.Settings layoutSettings = null,
+        int? maxLayoutsPerChain = null,
+        int layoutAttempts = 1)
+    {
+        error = null;
+        if (targetGrid == null || floorMap == null)
+        {
+            error = "Target grid and floor map are required.";
+            return false;
+        }
+
+        var originalGraph = graphAsset;
+        var expandedGraph = BuildCorridorGraph(graphAsset);
+        graphAsset = expandedGraph;
+
+        try
+        {
+            var totalStartTime = Time.realtimeSinceStartup;
+            var stamp = new TileStampService(targetGrid, floorMap, wallMap);
+            var precomputeStartTime = Time.realtimeSinceStartup;
+            if (!PrecomputeGeometry(stamp, out error))
+                return false;
+            var precomputeSeconds = Time.realtimeSinceStartup - precomputeStartTime;
+            // Optional verbose CS logging (shared via layout settings object).
+            if (layoutSettings != null)
+                configSpaceLibrary?.SetDebug(layoutSettings.VerboseConfigSpaceLogs, layoutSettings.MaxConfigSpaceLogs);
+
+            // Assign room/edge types first.
+            var solveStartTime = Time.realtimeSinceStartup;
+            if (!TrySolve(out var nodeAssign, out var edgeAssign, out error))
+                return false;
+            var solveSeconds = Time.realtimeSinceStartup - solveStartTime;
+
+            var layoutStartTime = Time.realtimeSinceStartup;
+            var baseSeed = randomSeed != 0
+                ? randomSeed
+                : UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+            // Do not vary seeds when a specific seed is provided (important for reproducible debugging).
+            var attempts = randomSeed != 0 ? 1 : Mathf.Max(1, layoutAttempts);
+            string lastError = null;
+
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                var attemptStart = Time.realtimeSinceStartup;
+                float layoutSeconds = 0f;
+                float faceChainSeconds = 0f;
+                float placeSeconds = 0f;
+                float stampSeconds = 0f;
+
+                // Generate high-level layout with positions/prefabs.
+                var attemptSeed = unchecked(baseSeed + attempt);
+                var layoutGenerator = new MapGraphLayoutGenerator(attemptSeed, layoutSettings);
+                var layoutGenStart = Time.realtimeSinceStartup;
+                if (!layoutGenerator.TryGenerate(expandedGraph, stamp, out var layout, out var genError, maxLayoutsPerChain))
+                {
+                    lastError = genError;
+                    if (verboseLogs)
+                        Debug.Log($"[MapGraphLevelSolver] Layout generation attempt {attempt + 1}/{attempts} failed: {genError}");
+                    continue;
+                }
+                layoutSeconds = Time.realtimeSinceStartup - layoutGenStart;
+
+                var faceChainStart = Time.realtimeSinceStartup;
+                if (!MapGraphFaceBuilder.TryBuildFaces(expandedGraph, out var faces, out error))
+                    return false;
+                if (!MapGraphChainBuilder.TryBuildChains(expandedGraph, faces, out var chains, out error))
+                    return false;
+                faceChainSeconds = Time.realtimeSinceStartup - faceChainStart;
+
+                var ordered = chains;
+                var rngLocal = new System.Random(attemptSeed);
+
+                var placer = new PlacementState(stamp, rngLocal, nodeAssign, edgeAssign, verboseLogs, startCell, layoutStartTime, maxDurationSeconds, shapeLibrary, configSpaceLibrary);
+                if (clearMaps)
+                    stamp.ClearMaps();
+
+                var placeStart = Time.realtimeSinceStartup;
+                if (!placer.PlaceFromLayout(layout, ordered, expandedGraph))
+                {
+                    lastError = placer.LastError ?? "Failed to place layout.";
+                    if (verboseLogs)
+                    {
+                        placeSeconds = Time.realtimeSinceStartup - placeStart;
+                        var attemptSeconds = Time.realtimeSinceStartup - attemptStart;
+                        var totalSeconds = Time.realtimeSinceStartup - totalStartTime;
+                        Debug.Log($"[MapGraphLevelSolver] Layout placement attempt {attempt + 1}/{attempts} failed after {attemptSeconds:0.000}s: {lastError}");
+                        Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
+                    }
+                    placer.Cleanup();
+                    continue;
+                }
+                placeSeconds = Time.realtimeSinceStartup - placeStart;
+
+                var stampStart = Time.realtimeSinceStartup;
+                placer.StampAll(disableRenderers: !destroyPlacedInstances);
+                if (destroyPlacedInstances)
+                    placer.DestroyPlacedInstances();
+                stampSeconds = Time.realtimeSinceStartup - stampStart;
+                if (verboseLogs)
+                {
+                    var attemptSeconds = Time.realtimeSinceStartup - attemptStart;
+                    var totalSeconds = Time.realtimeSinceStartup - totalStartTime;
+                    Debug.Log($"[MapGraphLevelSolver] Layout placement completed in {attemptSeconds:0.000}s.");
+                    Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
+                }
+                return true;
+            }
+
+            error = lastError ?? "Failed to generate/place layout after retries.";
+            return false;
+        }
+        finally
+        {
+            graphAsset = originalGraph;
+        }
+    }
+
+    /// <summary>
     /// Solves and immediately places prefabs with full backtracking. Result is stamped into provided tilemaps.
     /// Allows overriding the start room cell (e.g., from MapGraphBuilder transform).
     /// </summary>
-    public bool TrySolveAndPlace(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, Vector3Int? startCell, out string error, float maxDurationSeconds = 5f, bool destroyPlacedInstances = true)
+    public bool TrySolveAndPlace(
+        Grid targetGrid,
+        Tilemap floorMap,
+        Tilemap wallMap,
+        bool clearMaps,
+        int randomSeed,
+        bool verboseLogs,
+        Vector3Int? startCell,
+        out string error,
+        float maxDurationSeconds = 5f,
+        bool destroyPlacedInstances = true,
+        MapGraphLayoutGenerator.Settings layoutSettings = null,
+        int? maxLayoutsPerChain = null,
+        int layoutAttempts = 1)
+    {
+        return TrySolveAndPlaceWithLayout(
+            targetGrid,
+            floorMap,
+            wallMap,
+            clearMaps,
+            randomSeed,
+            verboseLogs,
+            startCell,
+            out error,
+            maxDurationSeconds,
+            destroyPlacedInstances,
+            layoutSettings,
+            maxLayoutsPerChain,
+            layoutAttempts);
+    }
+
+    private bool TrySolveAndPlaceLegacy(Grid targetGrid, Tilemap floorMap, Tilemap wallMap, bool clearMaps, int randomSeed, bool verboseLogs, Vector3Int? startCell, out string error, float maxDurationSeconds, bool destroyPlacedInstances)
     {
         error = null;
         if (targetGrid == null || floorMap == null)
@@ -91,8 +283,10 @@ public class MapGraphLevelSolver
 
         if (!MapGraphFaceBuilder.TryBuildFaces(graphAsset, out var faces, out error))
             return false;
+        if (!MapGraphChainBuilder.TryBuildChains(graphAsset, faces, out var chains, out error))
+            return false;
 
-        var ordered = faces.OrderBy(f => f.Nodes.Count).ToList();
+        var ordered = chains;
         var rngLocal = randomSeed != 0 ? new System.Random(randomSeed) : new System.Random(UnityEngine.Random.Range(int.MinValue, int.MaxValue));
 
         var solveStartTime = Time.realtimeSinceStartup;
@@ -123,13 +317,12 @@ public class MapGraphLevelSolver
         return true;
     }
 
-    private bool TrySolveFace(int faceIndex)
+    private bool TrySolveChain(int chainIndex)
     {
-        if (faceIndex >= orderedFaces.Count)
+        if (chainIndex >= orderedChains.Count)
             return true;
 
-        var face = orderedFaces[faceIndex];
-        return TryAssignNodeInFace(faceIndex, 0);
+        return TryAssignNodeInChain(chainIndex, 0);
     }
 
     /// <summary>
@@ -148,6 +341,7 @@ public class MapGraphLevelSolver
         configSpaceLibrary = new ConfigurationSpaceLibrary(shapeLibrary);
 
         var prefabs = new HashSet<GameObject>();
+        var connectorPrefabs = new HashSet<GameObject>();
         // Collect room prefabs
         foreach (var node in graphAsset.Nodes)
         {
@@ -167,7 +361,11 @@ public class MapGraphLevelSolver
             var conn = edge?.connectionType ?? graphAsset.DefaultConnectionType;
             if (conn?.prefabs == null) continue;
             foreach (var prefab in conn.prefabs)
-                if (prefab != null) prefabs.Add(prefab);
+                if (prefab != null)
+                {
+                    prefabs.Add(prefab);
+                    connectorPrefabs.Add(prefab);
+                }
         }
 
         // Build shapes
@@ -183,6 +381,8 @@ public class MapGraphLevelSolver
         {
             for (int j = 0; j < prefabList.Count; j++)
             {
+                if (connectorPrefabs.Contains(prefabList[i]) && connectorPrefabs.Contains(prefabList[j]))
+                    continue;
                 if (!configSpaceLibrary.TryGetSpace(prefabList[i], prefabList[j], out _, out error))
                     return false;
             }
@@ -191,28 +391,28 @@ public class MapGraphLevelSolver
         return true;
     }
 
-    private bool TryAssignNodeInFace(int faceIndex, int nodeIndex)
+    private bool TryAssignNodeInChain(int chainIndex, int nodeIndex)
     {
-        var face = orderedFaces[faceIndex];
-        if (nodeIndex >= face.Nodes.Count)
+        var chain = orderedChains[chainIndex];
+        if (nodeIndex >= chain.Nodes.Count)
         {
             var depthBeforeEdges = state.Depth;
-            if (!TryAssignAvailableEdgesForFace(face, faceIndex))
+            if (!TryAssignAvailableEdgesForChain(chain, chainIndex))
             {
                 state.RollbackToDepth(depthBeforeEdges);
                 return false;
             }
 
-            if (TrySolveFace(faceIndex + 1))
+            if (TrySolveChain(chainIndex + 1))
                 return true;
 
             state.RollbackToDepth(depthBeforeEdges);
             return false;
         }
 
-        var node = face.Nodes[nodeIndex];
+        var node = chain.Nodes[nodeIndex];
         if (node == null || string.IsNullOrEmpty(node.id) || state.NodeRooms.ContainsKey(node.id))
-            return TryAssignNodeInFace(faceIndex, nodeIndex + 1);
+            return TryAssignNodeInChain(chainIndex, nodeIndex + 1);
 
         var roomCandidates = new List<RoomTypeAsset>(GatherRoomCandidates(node));
         roomCandidates.Shuffle(rng);
@@ -220,22 +420,106 @@ public class MapGraphLevelSolver
 
         foreach (var candidate in roomCandidates)
         {
-            if (!state.PushNode(node.id, candidate, faceIndex))
+            if (!state.PushNode(node.id, candidate, chainIndex))
                 continue;
 
-            if (!TryAssignAvailableEdgesForFace(face, faceIndex))
+            if (!TryAssignAvailableEdgesForChain(chain, chainIndex))
             {
                 state.RollbackToDepth(depthBeforeNode);
                 continue;
             }
 
-            if (TryAssignNodeInFace(faceIndex, nodeIndex + 1))
+            if (TryAssignNodeInChain(chainIndex, nodeIndex + 1))
                 return true;
 
             state.RollbackToDepth(depthBeforeNode);
         }
 
         return false;
+    }
+
+    private MapGraphAsset BuildCorridorGraph(MapGraphAsset source)
+    {
+        if (source == null)
+            return null;
+
+        var expanded = ScriptableObject.CreateInstance<MapGraphAsset>();
+        expanded.DefaultRoomType = source.DefaultRoomType;
+        expanded.DefaultConnectionType = source.DefaultConnectionType;
+
+        var nodes = new List<MapGraphAsset.NodeData>();
+        var edges = new List<MapGraphAsset.EdgeData>();
+        var nodeMap = new Dictionary<string, MapGraphAsset.NodeData>();
+
+        foreach (var n in source.Nodes)
+        {
+            if (n == null || string.IsNullOrEmpty(n.id))
+                continue;
+            var copy = new MapGraphAsset.NodeData
+            {
+                id = n.id,
+                label = n.label,
+                roomType = n.roomType != null ? n.roomType : source.DefaultRoomType,
+                notes = n.notes,
+                position = n.position
+            };
+            nodes.Add(copy);
+            nodeMap[n.id] = copy;
+        }
+
+        var corridorTypes = new Dictionary<ConnectionTypeAsset, RoomTypeAsset>();
+        RoomTypeAsset GetCorridorRoomType(ConnectionTypeAsset conn)
+        {
+            var key = conn != null ? conn : source.DefaultConnectionType;
+            if (key == null)
+                return null;
+            if (corridorTypes.TryGetValue(key, out var rt))
+                return rt;
+            rt = ScriptableObject.CreateInstance<RoomTypeAsset>();
+            rt.prefabs = key.prefabs != null ? new List<GameObject>(key.prefabs) : new List<GameObject>();
+            rt.name = $"{key.name}_Corridor";
+            corridorTypes[key] = rt;
+            return rt;
+        }
+
+        foreach (var e in source.Edges)
+        {
+            if (e == null || string.IsNullOrEmpty(e.fromNodeId) || string.IsNullOrEmpty(e.toNodeId))
+                continue;
+            if (!nodeMap.TryGetValue(e.fromNodeId, out var a) || !nodeMap.TryGetValue(e.toNodeId, out var b))
+                continue;
+
+            var conn = e.connectionType != null ? e.connectionType : source.DefaultConnectionType;
+            var corridorRoom = GetCorridorRoomType(conn);
+            var corridorNode = new MapGraphAsset.NodeData
+            {
+                id = Guid.NewGuid().ToString("N"),
+                label = conn != null ? conn.name : "Corridor",
+                roomType = corridorRoom,
+                position = (a.position + b.position) * 0.5f
+            };
+            nodes.Add(corridorNode);
+
+            edges.Add(new MapGraphAsset.EdgeData
+            {
+                fromNodeId = a.id,
+                toNodeId = corridorNode.id,
+                connectionType = conn
+            });
+            edges.Add(new MapGraphAsset.EdgeData
+            {
+                fromNodeId = corridorNode.id,
+                toNodeId = b.id,
+                connectionType = conn
+            });
+        }
+
+        var nodesField = typeof(MapGraphAsset).GetField("nodes", BindingFlags.NonPublic | BindingFlags.Instance);
+        var edgesField = typeof(MapGraphAsset).GetField("edges", BindingFlags.NonPublic | BindingFlags.Instance);
+        nodesField?.SetValue(expanded, nodes);
+        edgesField?.SetValue(expanded, edges);
+        expanded.EnsureIds();
+        return expanded;
     }
 
     private IEnumerable<RoomTypeAsset> GatherRoomCandidates(MapGraphAsset.NodeData node)
@@ -247,12 +531,12 @@ public class MapGraphLevelSolver
         return Array.Empty<RoomTypeAsset>();
     }
 
-    private bool TryAssignAvailableEdgesForFace(MapGraphFaceBuilder.Face face, int faceIndex)
+    private bool TryAssignAvailableEdgesForChain(MapGraphChainBuilder.Chain chain, int chainIndex)
     {
-        if (face?.Edges == null)
+        if (chain?.Edges == null)
             return true;
 
-        foreach (var edge in face.Edges)
+        foreach (var edge in chain.Edges)
         {
             if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
                 continue;
@@ -268,7 +552,7 @@ public class MapGraphLevelSolver
             if (connection == null)
                 return false;
 
-            if (!state.PushEdge(key, connection, faceIndex))
+            if (!state.PushEdge(key, connection, chainIndex))
                 return false;
         }
 
@@ -368,14 +652,6 @@ public class MapGraphLevelSolver
 
     private sealed class PlacementState
     {
-        private static bool IsSimpleCycle(MapGraphFaceBuilder.Face face)
-        {
-            if (face == null || face.Nodes == null || face.Edges == null)
-                return false;
-            var distinctCount = face.Nodes.Select(n => n?.id).Where(id => !string.IsNullOrEmpty(id)).Distinct().Count();
-            return distinctCount == face.Nodes.Count && face.Edges.Count == face.Nodes.Count;
-        }
-
         private readonly TileStampService stamp;
         private readonly System.Random rng;
         private readonly IReadOnlyDictionary<string, RoomTypeAsset> nodeAssignments;
@@ -419,15 +695,51 @@ public class MapGraphLevelSolver
             totalEdges = edgeAssignments?.Count ?? 0;
         }
 
-        public bool Place(List<MapGraphFaceBuilder.Face> orderedFaces, MapGraphAsset graph)
+        public bool Place(List<MapGraphChainBuilder.Chain> orderedChains, MapGraphAsset graph)
         {
-            if (orderedFaces == null || orderedFaces.Count == 0)
+            return PlaceInternal(orderedChains, graph);
+        }
+
+        public bool PlaceFromLayout(MapGraphLayoutGenerator.LayoutResult layout, List<MapGraphChainBuilder.Chain> orderedChains, MapGraphAsset graph)
+        {
+            if (layout == null || layout.Rooms == null || layout.Rooms.Count == 0)
+            {
+                LastError = "Layout is empty.";
+                return false;
+            }
+
+            // Compute offset so that optional start cell matches the first room root.
+            var offset = Vector3Int.zero;
+            if (startCellOverride.HasValue)
+            {
+                var firstRoom = layout.Rooms.Values.FirstOrDefault();
+                if (firstRoom != null)
+                {
+                    var root = new Vector3Int(firstRoom.Root.x, firstRoom.Root.y, 0);
+                    offset = startCellOverride.Value - root;
+                }
+            }
+
+            if (!PreplaceLayoutRooms(layout, offset, graph))
+                return false;
+
+            // For corridor-as-node workflow, layout already contains all modules (rooms and corridors),
+            // so no connector placement is needed here.
+            return true;
+        }
+
+        private bool PlaceInternal(List<MapGraphChainBuilder.Chain> orderedChains, MapGraphAsset graph)
+        {
+            if (orderedChains == null || orderedChains.Count == 0)
                 return true;
 
             if (!CheckTimeLimit())
                 return false;
 
-            var startNode = orderedFaces.SelectMany(f => f.Nodes).FirstOrDefault(n => n != null && !string.IsNullOrEmpty(n.id) && nodeAssignments.ContainsKey(n.id));
+            if (placedNodes.Count > 0)
+                return PlaceChains(orderedChains, graph, 0, 0);
+
+            var startNode = orderedChains.SelectMany(c => c.Nodes).FirstOrDefault(n => n != null && !string.IsNullOrEmpty(n.id) && nodeAssignments.ContainsKey(n.id));
             if (startNode == null)
             {
                 Log("No start node found.");
@@ -442,10 +754,10 @@ public class MapGraphLevelSolver
                 return false;
             }
 
-            return PlaceFaces(orderedFaces, graph, 0, 0);
+            return PlaceChains(orderedChains, graph, 0, 0);
         }
 
-        private bool PlaceFaces(List<MapGraphFaceBuilder.Face> faces, MapGraphAsset graph, int faceIndex, int edgeIndex)
+        private bool PlaceChains(List<MapGraphChainBuilder.Chain> chains, MapGraphAsset graph, int chainIndex, int edgeIndex)
         {
             if (!CheckTimeLimit())
                 return false;
@@ -453,19 +765,19 @@ public class MapGraphLevelSolver
             if (placedNodes.Count >= nodeAssignments.Count && placedEdges.Count >= edgeAssignments.Count)
                 return true;
 
-            if (faceIndex >= faces.Count)
+            if (chainIndex >= chains.Count)
                 return placedNodes.Count >= nodeAssignments.Count && placedEdges.Count >= edgeAssignments.Count;
 
-            var face = faces[faceIndex];
-            if (face == null || face.Edges == null || face.Edges.Count == 0)
-                return PlaceFaces(faces, graph, faceIndex + 1, 0);
+            var chain = chains[chainIndex];
+            if (chain == null || chain.Edges == null || chain.Edges.Count == 0)
+                return PlaceChains(chains, graph, chainIndex + 1, 0);
 
             if (placedNodes.Count >= nodeAssignments.Count && placedEdges.Count >= edgeAssignments.Count)
                 return true;
 
-            for (int i = edgeIndex; i < face.Edges.Count; i++)
+            for (int i = edgeIndex; i < chain.Edges.Count; i++)
             {
-                var edge = face.Edges[i];
+                var edge = chain.Edges[i];
                 if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
                     continue;
 
@@ -487,9 +799,9 @@ public class MapGraphLevelSolver
 
                 bool placed;
                 if (aPlaced && bPlaced)
-                    placed = TryPlaceEdgeBetweenPlaced(anchorId, targetId, edge, graph, () => PlaceFaces(faces, graph, faceIndex, i + 1));
+                    placed = TryPlaceEdgeBetweenPlaced(anchorId, targetId, edge, graph, () => PlaceChains(chains, graph, chainIndex, i + 1));
                 else
-                    placed = TryPlaceEdge(aPlaced ? anchorId : targetId, aPlaced ? targetId : anchorId, edge, graph, () => PlaceFaces(faces, graph, faceIndex, i + 1));
+                    placed = TryPlaceEdge(aPlaced ? anchorId : targetId, aPlaced ? targetId : anchorId, edge, graph, () => PlaceChains(chains, graph, chainIndex, i + 1));
 
                 if (placed)
                     return true;
@@ -497,7 +809,7 @@ public class MapGraphLevelSolver
                 RollbackToDepth(depthBefore);
             }
 
-            return PlaceFaces(faces, graph, faceIndex + 1, 0);
+            return PlaceChains(chains, graph, chainIndex + 1, 0);
         }
 
         private bool TryPlaceRoom(string nodeId, Vector3Int targetCell)
@@ -553,6 +865,199 @@ public class MapGraphLevelSolver
 
             LastError ??= $"No prefab could be placed for node {nodeId}.";
             return false;
+        }
+
+        private bool PreplaceLayoutRooms(MapGraphLayoutGenerator.LayoutResult layout, Vector3Int offset, MapGraphAsset graph)
+        {
+            foreach (var kv in layout.Rooms)
+            {
+                var room = kv.Value;
+                if (room == null || room.Prefab == null)
+                {
+                    LastError = $"Layout room for node {kv.Key} is missing prefab.";
+                    return false;
+                }
+
+                var root = new Vector3Int(room.Root.x + offset.x, room.Root.y + offset.y, 0);
+
+                if (!TryGetBlueprint(room.Prefab, out var blueprint, out var bpError))
+                {
+                    LastError = bpError;
+                    return false;
+                }
+
+                BuildPlacementFromBlueprint(blueprint, root, out var floorCells, out var wallCells);
+                var inst = UnityEngine.Object.Instantiate(room.Prefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                var meta = inst.GetComponent<ModuleMetaBase>();
+                if (meta == null)
+                {
+                    UnityEngine.Object.Destroy(inst);
+                    LastError = $"Prefab {room.Prefab.name} has no ModuleMetaBase.";
+                    return false;
+                }
+
+                meta.ResetUsed();
+                AlignToCell(inst.transform, root);
+
+                if (!TryComputePlacement(meta, room.Prefab, out var placement))
+                {
+                    UnityEngine.Object.Destroy(inst);
+                    LastError = $"Failed to compute placement for {room.Prefab.name}.";
+                    return false;
+                }
+
+                CarveConnectorEntranceWalls(placement);
+
+                if (OverlapsOutsideAllowedSockets(room.NodeId, placement, graph))
+                {
+                    UnityEngine.Object.Destroy(inst);
+                    return false;
+                }
+
+                CommitPlacement(room.NodeId, placement);
+            }
+
+            ValidateAllEdgesTouch(graph);
+            return true;
+        }
+
+        private void ValidateAllEdgesTouch(MapGraphAsset graph)
+        {
+            if (graph == null || configSpaceLibrary == null)
+                return;
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                if (!placedNodes.TryGetValue(edge.fromNodeId, out var a) || !placedNodes.TryGetValue(edge.toNodeId, out var b))
+                    continue;
+
+                // Design constraint (see README): edges are valid only as Room ↔ CorridorRoom.
+                var aIsCorridor = a.Meta is ConnectorMeta;
+                var bIsCorridor = b.Meta is ConnectorMeta;
+                if (aIsCorridor == bIsCorridor)
+                {
+                    LastError = $"Invalid edge {edge.fromNodeId}->{edge.toNodeId}: expected Room↔Corridor only.";
+                    throw new InvalidOperationException(LastError);
+                }
+
+                if (!configSpaceLibrary.TryGetSpace(a.Prefab, b.Prefab, out var space, out _))
+                {
+                    LastError = $"Edge {edge.fromNodeId}->{edge.toNodeId} missing configuration space.";
+                    throw new InvalidOperationException(LastError);
+                }
+                if (space == null || space.IsEmpty)
+                {
+                    LastError = $"Edge {edge.fromNodeId}->{edge.toNodeId} has empty configuration space.";
+                    throw new InvalidOperationException(LastError);
+                }
+
+                var delta = b.RootCell - a.RootCell;
+                if (!space.Contains(new Vector2Int(delta.x, delta.y)))
+                {
+                    LastError = $"Edge {edge.fromNodeId}->{edge.toNodeId} not satisfied in layout.";
+                    throw new InvalidOperationException(LastError);
+                }
+            }
+        }
+
+        private bool OverlapsOutsideAllowedSockets(string nodeId, Placement placement, MapGraphAsset graph)
+        {
+            // Allow overlap only at the bite cell for each satisfied Room↔Corridor edge.
+            // Additionally, allow connector side-wall cells adjacent to the bite cell to overlap room floors.
+            var allowedFloorOverlap = new HashSet<Vector3Int>();
+            var allowedFloorOnWall = new HashSet<Vector3Int>();
+            var allowedWallOnFloor = new HashSet<Vector3Int>();
+            var placementIsConnector = placement?.Meta is ConnectorMeta;
+
+            static IEnumerable<Vector3Int> SideBiteCells(Vector3Int biteCell, DoorSide side)
+            {
+                var tangent = side == DoorSide.North || side == DoorSide.South ? Vector3Int.right : Vector3Int.up;
+                yield return biteCell + tangent;
+                yield return biteCell - tangent;
+            }
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                var aId = edge.fromNodeId;
+                var bId = edge.toNodeId;
+                if (aId != nodeId && bId != nodeId)
+                    continue;
+
+                var otherId = aId == nodeId ? bId : aId;
+                if (!placedNodes.TryGetValue(otherId, out var otherPlacement) || otherPlacement?.Meta == null)
+                    continue;
+
+                // Find aligned sockets between placement and otherPlacement
+                foreach (var sockA in placement.Meta.Sockets ?? Array.Empty<DoorSocket>())
+                {
+                    if (sockA == null) continue;
+                    var cellA = stamp.CellFromWorld(sockA.transform.position);
+                    foreach (var sockB in otherPlacement.Meta.Sockets ?? Array.Empty<DoorSocket>())
+                    {
+                        if (sockB == null) continue;
+                        if (sockA.Side != sockB.Side.Opposite()) continue;
+                        var cellB = stamp.CellFromWorld(sockB.transform.position);
+                        if (cellA != cellB) continue;
+
+                        allowedFloorOverlap.Add(cellA);
+                        allowedFloorOnWall.Add(cellA);
+                        allowedWallOnFloor.Add(cellA);
+
+                        if (placementIsConnector)
+                        {
+                            foreach (var c in SideBiteCells(cellA, sockA.Side))
+                                allowedWallOnFloor.Add(c);
+                        }
+                    }
+                }
+            }
+
+            // Floors cannot overlap floors except allowed; walls cannot overlap floors; floors cannot overlap walls unless allowed.
+            if (HasOverlap(placement.FloorCells, occupiedFloor, allowedFloorOverlap))
+            {
+                LastError = $"Layout room {placement.Prefab.name} overlaps existing floors.";
+                return true;
+            }
+            if (HasOverlap(placement.WallCells, occupiedFloor, allowedWallOnFloor))
+            {
+                LastError = $"Layout room {placement.Prefab.name} walls overlap existing floors.";
+                return true;
+            }
+            if (HasOverlap(placement.FloorCells, occupiedWall, allowedFloorOnWall))
+            {
+                LastError = $"Layout room {placement.Prefab.name} floors overlap existing walls.";
+                return true;
+            }
+            return false;
+        }
+
+        private void CarveConnectorEntranceWalls(Placement placement, IEnumerable<DoorSocket> socketsOverride = null)
+        {
+            if (placement?.Meta is not ConnectorMeta)
+                return;
+
+            var sockets = socketsOverride ?? (placement.Meta.Sockets ?? Array.Empty<DoorSocket>());
+            foreach (var sock in sockets)
+            {
+                if (sock == null)
+                    continue;
+                var biteCell = stamp.CellFromWorld(sock.transform.position);
+                CarveConnectorEntranceWalls(placement.WallCells, biteCell, sock.Side);
+            }
+        }
+
+        private void CarveConnectorEntranceWalls(HashSet<Vector3Int> connectorWalls, Vector3Int biteCell, DoorSide side)
+        {
+            if (connectorWalls == null)
+                return;
+
+            var tangent = side == DoorSide.North || side == DoorSide.South ? Vector3Int.right : Vector3Int.up;
+            connectorWalls.Remove(biteCell + tangent);
+            connectorWalls.Remove(biteCell - tangent);
         }
 
         private bool TryPlaceEdge(string anchorId, string targetId, MapGraphAsset.EdgeData edge, MapGraphAsset graph, Func<bool> continueAfterPlacement)
@@ -626,6 +1131,7 @@ public class MapGraphLevelSolver
                     {
                         var connRootCell = anchorCell - s1.CellOffset;
                         BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
+                        CarveConnectorEntranceWalls(connWalls, anchorCell, s1.Side);
                         var allowedAnchorStrip = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
                         if (HasOverlap(connFloors, occupiedFloor, allowedAnchorStrip))
                             continue;
@@ -641,6 +1147,7 @@ public class MapGraphLevelSolver
                         foreach (var s2 in s2Candidates)
                         {
                             var s2Cell = connRootCell + s2.CellOffset;
+                            CarveConnectorEntranceWalls(connWalls, s2Cell, s2.Side);
                             var roomPrefabs = GetRoomPrefabs(targetRoomType, s2.Side.Opposite(), s2.Width, out var roomPrefabsError);
                             roomPrefabs.Shuffle(rng);
                             if (roomPrefabs.Count == 0)
@@ -730,6 +1237,8 @@ public class MapGraphLevelSolver
                                     continue;
                                 }
 
+                                CarveConnectorEntranceWalls(connPlacement, new[] { s1Actual, s2Actual });
+
                                 var roomInst = UnityEngine.Object.Instantiate(roomPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
                                 var roomMeta = roomInst.GetComponent<RoomMeta>();
                                 if (roomMeta == null)
@@ -761,7 +1270,7 @@ public class MapGraphLevelSolver
                                     continue;
                                 }
 
-                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, anchorSock });
+                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock });
                                 roomPlacement.UsedSockets.Add(roomSockActual);
                                 connPlacement.EdgeKey = key;
 
@@ -830,6 +1339,26 @@ public class MapGraphLevelSolver
                 return false;
             }
 
+            // Fast path: if rooms already satisfy config-space and have aligned sockets, mark edge placed without connector.
+            if (FitsConfigSpace(anchorPrefab, targetPrefab, anchorPlacement.RootCell, targetPlacement.RootCell))
+            {
+                foreach (var aSock in anchorSockets)
+                {
+                    var aCell = stamp.CellFromWorld(aSock.transform.position);
+                    foreach (var tSock in targetSockets.Where(s => s.Side == aSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(aSock.Width)))
+                    {
+                        var tCell = stamp.CellFromWorld(tSock.transform.position);
+                        if (aCell != tCell)
+                            continue;
+
+                        usedSockets.Add(aSock);
+                        usedSockets.Add(tSock);
+                        placedEdges.Add(key);
+                        return continueAfterPlacement == null || continueAfterPlacement();
+                    }
+                }
+            }
+
             foreach (var anchorSock in anchorSockets)
             {
                 var connectorPrefabs = GetConnectorPrefabs(connectionType, anchorSock.Side.Opposite(), NormalizeWidth(anchorSock.Width), out var prefabError);
@@ -865,6 +1394,7 @@ public class MapGraphLevelSolver
                     {
                         var connRootCell = anchorCell - s1.CellOffset;
                         BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
+                        CarveConnectorEntranceWalls(connWalls, anchorCell, s1.Side);
 
                         var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
                         s2Candidates.Shuffle(rng);
@@ -884,6 +1414,8 @@ public class MapGraphLevelSolver
                                 var s2Cell = connRootCell + s2.CellOffset;
                                 if (s2Cell != targetCell)
                                     continue;
+
+                                CarveConnectorEntranceWalls(connWalls, targetCell, s2.Side);
 
                                 if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
                                     continue;
@@ -931,7 +1463,9 @@ public class MapGraphLevelSolver
                                     continue;
                                 }
 
-                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, anchorSock, targetSock });
+                                CarveConnectorEntranceWalls(connPlacement, new[] { s1Actual, s2Actual });
+
+                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock, targetSock });
                                 connPlacement.EdgeKey = key;
 
                                 CommitPlacement(null, connPlacement);
@@ -977,7 +1511,7 @@ public class MapGraphLevelSolver
             }
         }
 
-        private static int NormalizeWidth(int width) => Mathf.Max(1, width);
+        private static int NormalizeWidth(int width) => 1;
 
         private Vector3Int GraphPosToCell(Vector2 graphPos)
         {
@@ -1023,6 +1557,14 @@ public class MapGraphLevelSolver
             foreach (var off in cached.WallOffsets)
                 walls.Add(rootCell + off);
 
+            // Ignore "floor under wall" cells for overlap purposes; keep bite socket-cells as floor.
+            floors.ExceptWith(walls);
+            foreach (var s in meta.Sockets ?? Array.Empty<DoorSocket>())
+            {
+                if (s == null) continue;
+                floors.Add(stamp.CellFromWorld(s.transform.position));
+            }
+
             placement = new Placement(meta, floors, walls, prefab, rootCell);
             return true;
         }
@@ -1056,10 +1598,13 @@ public class MapGraphLevelSolver
             var floorCells = stamp.CollectModuleFloorCells(meta);
             var wallCells = stamp.CollectModuleWallCells(meta);
 
-            var floorOffsets = new List<Vector3Int>(floorCells.Count);
-            foreach (var c in floorCells) floorOffsets.Add(c - rootCell);
-            var wallOffsets = new List<Vector3Int>(wallCells.Count);
-            foreach (var c in wallCells) wallOffsets.Add(c - rootCell);
+            var wallOffsetsSet = new HashSet<Vector3Int>();
+            foreach (var c in wallCells) wallOffsetsSet.Add(c - rootCell);
+            var floorOffsetsSet = new HashSet<Vector3Int>();
+            foreach (var c in floorCells) floorOffsetsSet.Add(c - rootCell);
+
+            // Ignore "floor under wall" cells for overlap purposes; keep bite socket-cells as floor.
+            floorOffsetsSet.ExceptWith(wallOffsetsSet);
 
             var sockets = new List<SocketInfo>();
             if (meta.Sockets != null)
@@ -1068,11 +1613,13 @@ public class MapGraphLevelSolver
                 {
                     if (s == null) continue;
                     var sockCell = stamp.CellFromWorld(s.transform.position);
-                    sockets.Add(new SocketInfo(s.Side, NormalizeWidth(s.Width), sockCell - rootCell));
+                    var off = sockCell - rootCell;
+                    sockets.Add(new SocketInfo(s.Side, NormalizeWidth(s.Width), off));
+                    floorOffsetsSet.Add(off);
                 }
             }
 
-            blueprint = new ModuleBlueprint(floorOffsets, wallOffsets, sockets);
+            blueprint = new ModuleBlueprint(floorOffsetsSet.ToList(), wallOffsetsSet.ToList(), sockets);
             blueprintCache[prefab] = blueprint;
             UnityEngine.Object.Destroy(inst);
             return true;
@@ -1217,16 +1764,11 @@ public class MapGraphLevelSolver
             return false;
         }
 
-        private HashSet<Vector3Int> AllowedWidthStrip(Vector3Int anchorCell, DoorSide side, int width)
-        {
-            var res = new HashSet<Vector3Int>();
-            int k = Mathf.Max(1, width);
-            int half = k / 2;
-            var perp = side.PerpendicularAxis();
-            for (int w = -half; w <= half; w++)
-                res.Add(anchorCell + perp * w);
-            return res;
-        }
+	        private HashSet<Vector3Int> AllowedWidthStrip(Vector3Int anchorCell, DoorSide side, int width)
+	        {
+	            // Width is currently not supported; allow only the socket cell itself.
+	            return new HashSet<Vector3Int> { anchorCell };
+	        }
 
         private void CommitPlacement(string nodeId, Placement placement)
         {
@@ -1329,7 +1871,7 @@ public class MapGraphLevelSolver
             public List<DoorSocket> UsedSockets { get; }
             public (string,string)? EdgeKey { get; set; }
             public GameObject Prefab { get; }
-            public Vector3Int RootCell { get; }
+            public Vector3Int RootCell { get; private set; }
 
             public Placement(ModuleMetaBase meta, HashSet<Vector3Int> floors, HashSet<Vector3Int> walls, GameObject prefab, Vector3Int rootCell)
             {
@@ -1340,6 +1882,11 @@ public class MapGraphLevelSolver
                 EdgeKey = null;
                 Prefab = prefab;
                 RootCell = rootCell;
+            }
+
+            public void SetRoot(Vector3Int root)
+            {
+                RootCell = root;
             }
         }
 

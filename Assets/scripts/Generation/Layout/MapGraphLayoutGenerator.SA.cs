@@ -624,7 +624,8 @@ public sealed partial class MapGraphLayoutGenerator
         var targetId = movableNodeIds[rng.Next(movableNodeIds.Count)];
         if (!rooms.TryGetValue(targetId, out var targetPlacement) || targetPlacement == null)
             return false;
-        var changeShape = rng.NextDouble() < 0.35;
+        var pChange = Mathf.Clamp01(settings.ChangePrefabProbability);
+        var changeShape = rng.NextDouble() < pChange;
 
         var prefabs = GetRoomPrefabs(graphAsset.GetNodeById(targetId));
         if (prefabs.Count == 0)
@@ -668,31 +669,122 @@ public sealed partial class MapGraphLayoutGenerator
     {
         var start = profiling != null ? NowTicks() : 0;
         result?.Clear();
-        neighborIdsScratch.Clear();
+        if (string.IsNullOrEmpty(nodeId) || prefab == null || placed == null)
+            return;
+
+        neighborRootsScratch.Clear();
         foreach (var e in graphAsset.GetEdgesFor(nodeId))
         {
             var otherId = e.fromNodeId == nodeId ? e.toNodeId : e.fromNodeId;
             if (string.IsNullOrEmpty(otherId))
                 continue;
-            if (!placed.ContainsKey(otherId))
+            if (!placed.TryGetValue(otherId, out var neighbor) || neighbor == null)
                 continue;
-            neighborIdsScratch.Add(otherId);
+            if (!configSpaceLibrary.TryGetSpace(neighbor.Prefab, prefab, out var space, out _))
+                continue;
+            if (space == null || space.IsEmpty)
+                continue;
+            neighborRootsScratch.Add((neighbor, space));
         }
-        if (neighborIdsScratch.Count == 0)
+
+        if (neighborRootsScratch.Count == 0)
             return;
 
-        var neighborId = neighborIdsScratch[rng.Next(neighborIdsScratch.Count)];
-        var neighbor = placed[neighborId];
-        if (!configSpaceLibrary.TryGetSpace(neighbor.Prefab, prefab, out var space, out _))
-            return;
-
-        candidatesScratch.Clear();
-        foreach (var off in space.Offsets)
-            candidatesScratch.Add(neighbor.Root + off);
-        candidatesScratch.Shuffle(rng);
         var limit = Mathf.Max(1, settings.MaxWiggleCandidates);
-        for (var i = 0; i < candidatesScratch.Count && i < limit; i++)
-            result?.Add(candidatesScratch[i]);
+
+        // If we have 2+ already-placed neighbors, prefer candidate roots that satisfy config-space constraints for two edges at once:
+        // P = A.Root + deltaA, where deltaA ∈ CS(A->U) and (P - B.Root) ∈ CS(B->U).
+        if (neighborRootsScratch.Count >= 2)
+        {
+            var best1 = -1;
+            var best2 = -1;
+            var c1 = int.MaxValue;
+            var c2 = int.MaxValue;
+            for (var i = 0; i < neighborRootsScratch.Count; i++)
+            {
+                var c = neighborRootsScratch[i].space?.Offsets?.Count ?? int.MaxValue;
+                if (c < c1)
+                {
+                    best2 = best1;
+                    c2 = c1;
+                    best1 = i;
+                    c1 = c;
+                }
+                else if (c < c2)
+                {
+                    best2 = i;
+                    c2 = c;
+                }
+            }
+
+            if (best1 >= 0 && best2 >= 0)
+            {
+                var a = neighborRootsScratch[best1];
+                var b = neighborRootsScratch[best2];
+
+                // Iterate the smaller offset set for speed.
+                if ((a.space?.Offsets?.Count ?? 0) > (b.space?.Offsets?.Count ?? 0))
+                {
+                    var tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+
+                var seen = 0;
+                foreach (var off in a.space.Offsets)
+                {
+                    var pos = a.placement.Root + off;
+                    if (!b.space.Contains(pos - b.placement.Root))
+                        continue;
+
+                    // Reservoir-sample candidates without shuffling large lists.
+                    seen++;
+                    if (result != null)
+                    {
+                        if (result.Count < limit)
+                            result.Add(pos);
+                        else
+                        {
+                            var j = rng.Next(seen);
+                            if (j < limit)
+                                result[j] = pos;
+                        }
+                    }
+                }
+
+                // If intersection is non-empty, prefer it.
+                if (result != null && result.Count > 0)
+                {
+                    if (profiling != null)
+                    {
+                        profiling.WiggleCandidatesCalls++;
+                        profiling.WiggleCandidatesTicks += NowTicks() - start;
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Fallback: pick a random already-placed neighbor and sample from its configuration-space.
+        var idx = rng.Next(neighborRootsScratch.Count);
+        var baseNeighbor = neighborRootsScratch[idx];
+        var seenBase = 0;
+        foreach (var off in baseNeighbor.space.Offsets)
+        {
+            var pos = baseNeighbor.placement.Root + off;
+            seenBase++;
+            if (result != null)
+            {
+                if (result.Count < limit)
+                    result.Add(pos);
+                else
+                {
+                    var j = rng.Next(seenBase);
+                    if (j < limit)
+                        result[j] = pos;
+                }
+            }
+        }
 
         if (profiling != null)
         {

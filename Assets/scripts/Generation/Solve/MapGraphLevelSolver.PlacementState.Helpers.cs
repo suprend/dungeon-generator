@@ -87,7 +87,8 @@ public partial class MapGraphLevelSolver
             foreach (var s in meta.Sockets ?? Array.Empty<DoorSocket>())
             {
                 if (s == null) continue;
-                floors.Add(stamp.CellFromWorld(s.transform.position));
+                var cell = stamp.CellFromWorld(s.transform.position);
+                floors.Add(cell);
             }
 
             placement = new Placement(meta, floors, walls, prefab, rootCell);
@@ -139,7 +140,7 @@ public partial class MapGraphLevelSolver
                     if (s == null) continue;
                     var sockCell = stamp.CellFromWorld(s.transform.position);
                     var off = sockCell - rootCell;
-                    sockets.Add(new SocketInfo(s.Side, NormalizeWidth(s.Width), off));
+                    sockets.Add(new SocketInfo(s.Side, NormalizeWidth(s.Width), s.BiteDepth, off));
                     floorOffsetsSet.Add(off);
                 }
             }
@@ -258,6 +259,84 @@ public partial class MapGraphLevelSolver
             return false;
         }
 
+        private bool IsSocketBlocked(ModuleMetaBase owner, DoorSocket socket)
+        {
+            if (socket == null)
+                return true;
+            if (usedSockets.Contains(socket))
+                return true;
+
+            var spanId = socket.SpanId;
+            if (string.IsNullOrEmpty(spanId))
+                return false;
+
+            owner ??= socket.GetComponentInParent<ModuleMetaBase>();
+            if (owner == null)
+                return false;
+
+            return usedSocketSpans.Contains((owner, spanId));
+        }
+
+        private void MarkSocketUsed(DoorSocket socket)
+        {
+            if (socket == null)
+                return;
+
+            usedSockets.Add(socket);
+
+            var spanId = socket.SpanId;
+            if (string.IsNullOrEmpty(spanId))
+                return;
+
+            var owner = socket.GetComponentInParent<ModuleMetaBase>();
+            if (owner != null)
+                usedSocketSpans.Add((owner, spanId));
+        }
+
+        private void UnmarkSocketUsed(DoorSocket socket)
+        {
+            if (socket == null)
+                return;
+
+            usedSockets.Remove(socket);
+
+            var spanId = socket.SpanId;
+            if (string.IsNullOrEmpty(spanId))
+                return;
+
+            var owner = socket.GetComponentInParent<ModuleMetaBase>();
+            if (owner == null)
+                return;
+
+            var key = (owner, spanId);
+            if (!usedSocketSpans.Contains(key))
+                return;
+
+            // Defensive: only clear the span lock when no other socket from the same span is still marked used.
+            foreach (var s in usedSockets)
+            {
+                if (s == null)
+                    continue;
+                if (s == socket)
+                    continue;
+                if (s.SpanId != spanId)
+                    continue;
+                if (s.GetComponentInParent<ModuleMetaBase>() != owner)
+                    continue;
+                return;
+            }
+
+            usedSocketSpans.Remove(key);
+        }
+
+        private static void AddUsedSocketToPlacement(Placement placement, DoorSocket socket)
+        {
+            if (placement == null || socket == null)
+                return;
+            if (!placement.UsedSockets.Contains(socket))
+                placement.UsedSockets.Add(socket);
+        }
+
         private bool HasConfigSpace(GameObject fixedPrefab, GameObject movingPrefab)
         {
             if (configSpaceLibrary == null || fixedPrefab == null || movingPrefab == null)
@@ -300,7 +379,7 @@ public partial class MapGraphLevelSolver
             placementStack.Add(placement);
             foreach (var c in placement.FloorCells) occupiedFloor.Add(c);
             foreach (var c in placement.WallCells) occupiedWall.Add(c);
-            foreach (var s in placement.UsedSockets) usedSockets.Add(s);
+            foreach (var s in placement.UsedSockets) MarkSocketUsed(s);
             if (placement.EdgeKey.HasValue)
                 placedEdges.Add(placement.EdgeKey.Value);
             if (!string.IsNullOrEmpty(nodeId))
@@ -322,8 +401,8 @@ public partial class MapGraphLevelSolver
             foreach (var placement in placementStack)
             {
                 if (placement.Meta == null) continue;
-                stamp.StampModuleFloor(placement.Meta);
-                stamp.StampModuleWalls(placement.Meta);
+                stamp.StampModuleFloor(placement.Meta, placement.FloorCells);
+                stamp.StampModuleWalls(placement.Meta, overrideCells: null, allowedCells: placement.WallCells);
                 if (disableRenderers)
                     stamp.DisableRenderers(placement.Meta.transform);
             }
@@ -342,6 +421,7 @@ public partial class MapGraphLevelSolver
             occupiedFloor.Clear();
             occupiedWall.Clear();
             usedSockets.Clear();
+            usedSocketSpans.Clear();
         }
 
         public void Cleanup()
@@ -357,6 +437,7 @@ public partial class MapGraphLevelSolver
             occupiedFloor.Clear();
             occupiedWall.Clear();
             usedSockets.Clear();
+            usedSocketSpans.Clear();
         }
 
         private void RemovePlacement(Placement p)
@@ -365,7 +446,7 @@ public partial class MapGraphLevelSolver
                 placedNodes.Remove(kv.Key);
             foreach (var c in p.FloorCells) occupiedFloor.Remove(c);
             foreach (var c in p.WallCells) occupiedWall.Remove(c);
-            foreach (var s in p.UsedSockets) usedSockets.Remove(s);
+            foreach (var s in p.UsedSockets) UnmarkSocketUsed(s);
             if (p.EdgeKey.HasValue)
                 placedEdges.Remove(p.EdgeKey.Value);
             if (p.Meta != null)
@@ -445,12 +526,14 @@ public partial class MapGraphLevelSolver
         {
             public DoorSide Side { get; }
             public int Width { get; }
+            public int BiteDepth { get; }
             public Vector3Int CellOffset { get; }
 
-            public SocketInfo(DoorSide side, int width, Vector3Int cellOffset)
+            public SocketInfo(DoorSide side, int width, int biteDepth, Vector3Int cellOffset)
             {
                 Side = side;
                 Width = width;
+                BiteDepth = Mathf.Max(1, biteDepth);
                 CellOffset = cellOffset;
             }
         }

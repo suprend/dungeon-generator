@@ -226,22 +226,19 @@ public sealed partial class MapGraphLayoutGenerator
         // Delta from A-local to B-local overlap checks.
         var deltaBA = b.Root - a.Root;
 
-        // Floor↔floor overlaps (except allowed bite).
-        var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var lastFloorOverlapCellWorld, earlyStopAtTwo: false);
-        var allowedBite = floorOverlapCount == 1 && IsAllowedBiteOverlap(a, b, 1);
-        if (floorOverlapCount > 0 && !allowedBite)
-            penalty += floorOverlapCount;
+        TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB);
 
-        // Wall↔floor overlaps (except allowed bite cell / carve-mask).
-        var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, lastFloorOverlapCellWorld) : AllowedWorldCells.None;
-        var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, lastFloorOverlapCellWorld) : AllowedWorldCells.None;
+        // Floor↔floor overlaps (except allowed bite-depth cut cells).
+        var illegalFloorFloor = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloor, a.Root, out _, earlyStopAtTwo: false);
+        if (illegalFloorFloor > 0)
+            penalty += illegalFloorFloor;
 
         // aWalls vs bFloors
-        penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedA, a.Root, out _, earlyStopAtTwo: false);
+        penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out _, earlyStopAtTwo: false);
 
         // bWalls vs aFloors: invert delta (A relative to B)
         var deltaAB = a.Root - b.Root;
-        penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedB, b.Root, out _, earlyStopAtTwo: false);
+        penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out _, earlyStopAtTwo: false);
 
         return penalty;
     }

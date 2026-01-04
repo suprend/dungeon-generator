@@ -10,13 +10,15 @@ public sealed class ShapeSocket
 {
     public DoorSide Side { get; }
     public int Width { get; }
+    public int BiteDepth { get; }
     public Vector2Int CellOffset { get; }
     public IReadOnlyCollection<Vector2Int> ContactCells { get; }
 
-    public ShapeSocket(DoorSide side, int width, Vector2Int cellOffset, IReadOnlyCollection<Vector2Int> contactCells)
+    public ShapeSocket(DoorSide side, int width, int biteDepth, Vector2Int cellOffset, IReadOnlyCollection<Vector2Int> contactCells)
     {
         Side = side;
         Width = Mathf.Max(1, width);
+        BiteDepth = Mathf.Max(1, biteDepth);
         CellOffset = cellOffset;
         ContactCells = contactCells ?? new List<Vector2Int>();
     }

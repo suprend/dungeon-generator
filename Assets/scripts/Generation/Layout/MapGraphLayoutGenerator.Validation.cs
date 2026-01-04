@@ -9,37 +9,211 @@ public sealed partial class MapGraphLayoutGenerator
     private readonly struct AllowedWorldCells
     {
         public static AllowedWorldCells None => default;
+        private readonly byte mode; // 0 = none, 1 = explicit set (1 or 3), 2 = ray mask
         private readonly byte count;
         private readonly Vector2Int a;
         private readonly Vector2Int b;
         private readonly Vector2Int c;
 
+        // Ray-mode fields (world cells).
+        private readonly Vector2Int rayBase;
+        private readonly Vector2Int rayInward;
+        private readonly Vector2Int rayTangent;
+        private readonly int rayMaxK;
+        private readonly byte rayMask; // 1 = floor ray, 2 = wall rays
+
         public AllowedWorldCells(Vector2Int one)
         {
+            mode = 1;
             count = 1;
             a = one;
             b = default;
             c = default;
+            rayBase = default;
+            rayInward = default;
+            rayTangent = default;
+            rayMaxK = 0;
+            rayMask = 0;
         }
 
         public AllowedWorldCells(Vector2Int one, Vector2Int two, Vector2Int three)
         {
+            mode = 1;
             count = 3;
             a = one;
             b = two;
             c = three;
+            rayBase = default;
+            rayInward = default;
+            rayTangent = default;
+            rayMaxK = 0;
+            rayMask = 0;
+        }
+
+        private AllowedWorldCells(Vector2Int rayBase, Vector2Int rayInward, Vector2Int rayTangent, int rayMaxK, byte rayMask)
+        {
+            mode = 2;
+            count = 0;
+            a = default;
+            b = default;
+            c = default;
+            this.rayBase = rayBase;
+            this.rayInward = rayInward;
+            this.rayTangent = rayTangent;
+            this.rayMaxK = rayMaxK;
+            this.rayMask = rayMask;
+        }
+
+        public static AllowedWorldCells Rays(Vector2Int rayBase, Vector2Int rayInward, Vector2Int rayTangent, int maxKInclusive, byte rayMask)
+        {
+            if (maxKInclusive < 0 || rayMask == 0)
+                return None;
+            return new AllowedWorldCells(rayBase, rayInward, rayTangent, maxKInclusive, rayMask);
         }
 
         public bool Contains(Vector2Int cell)
         {
-            if (count == 0)
+            if (mode == 0)
                 return false;
-            if (cell == a)
+
+            if (mode == 1)
+            {
+                if (count == 0)
+                    return false;
+                if (cell == a)
+                    return true;
+                if (count == 1)
+                    return false;
+                return cell == b || cell == c;
+            }
+
+            var offset = cell - rayBase;
+            var k = offset.x * rayInward.x + offset.y * rayInward.y;
+            if (k < 0 || k > rayMaxK)
+                return false;
+            var perp = offset - rayInward * k;
+            if ((rayMask & 1) != 0 && perp == Vector2Int.zero)
                 return true;
-            if (count == 1)
-                return false;
-            return cell == b || cell == c;
+            if ((rayMask & 2) != 0 && (perp == rayTangent || perp == -rayTangent))
+                return true;
+            return false;
         }
+    }
+
+    private static Vector2Int InwardVector(DoorSide side)
+    {
+        return side switch
+        {
+            DoorSide.North => Vector2Int.down,
+            DoorSide.South => Vector2Int.up,
+            DoorSide.East => Vector2Int.left,
+            DoorSide.West => Vector2Int.right,
+            _ => Vector2Int.down
+        };
+    }
+
+    private static Vector2Int TangentVector(DoorSide side)
+    {
+        return side == DoorSide.North || side == DoorSide.South ? Vector2Int.right : Vector2Int.up;
+    }
+
+    private bool TryGetBiteAllowance(
+        RoomPlacement a,
+        RoomPlacement b,
+        out AllowedWorldCells allowedFloorOverlap,
+        out AllowedWorldCells allowedWallAOnFloorB,
+        out AllowedWorldCells allowedWallBOnFloorA)
+    {
+        allowedFloorOverlap = AllowedWorldCells.None;
+        allowedWallAOnFloorB = AllowedWorldCells.None;
+        allowedWallBOnFloorA = AllowedWorldCells.None;
+
+        if (a == null || b == null)
+            return false;
+
+        if (!AreNeighbors(a.NodeId, b.NodeId))
+            return false;
+
+        var aIsConnector = IsConnector(a.Prefab);
+        var bIsConnector = IsConnector(b.Prefab);
+        if (aIsConnector == bIsConnector)
+            return false;
+
+        var conn = aIsConnector ? a : b;
+        var room = aIsConnector ? b : a;
+
+        if (!TryFindBiteDepth(conn, room, out var baseCell, out var inward, out var tangent, out var maxK))
+            return false;
+
+        allowedFloorOverlap = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 1);
+        var allowedConnectorWalls = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 2);
+        if (aIsConnector)
+            allowedWallAOnFloorB = allowedConnectorWalls;
+        else
+            allowedWallBOnFloorA = allowedConnectorWalls;
+
+        // Room socket cell is authored as a wall and becomes a door only when the edge is actually used in placement.
+        // During layout/energy we allow that single room-wall on connector-floor overlap at the chosen door cell.
+        var doorCell = baseCell + inward * maxK;
+        if (aIsConnector)
+            allowedWallBOnFloorA = new AllowedWorldCells(doorCell);
+        else
+            allowedWallAOnFloorB = new AllowedWorldCells(doorCell);
+
+        return true;
+    }
+
+    private bool TryFindBiteDepth(
+        RoomPlacement connector,
+        RoomPlacement room,
+        out Vector2Int connectorSocketBaseWorld,
+        out Vector2Int inward,
+        out Vector2Int tangent,
+        out int maxKInclusive)
+    {
+        connectorSocketBaseWorld = default;
+        inward = default;
+        tangent = default;
+        maxKInclusive = 0;
+
+        if (connector?.Shape?.Sockets == null || room?.Shape?.Sockets == null)
+            return false;
+        if (connector.Prefab == null || room.Prefab == null)
+            return false;
+        if (!IsConnector(connector.Prefab) || IsConnector(room.Prefab))
+            return false;
+
+        foreach (var connSock in connector.Shape.Sockets)
+        {
+            if (connSock == null)
+                continue;
+
+            inward = InwardVector(connSock.Side);
+            tangent = TangentVector(connSock.Side);
+            var baseWorld = connector.Root + connSock.CellOffset;
+            var maxDepth = Mathf.Max(1, connSock.BiteDepth);
+
+            foreach (var roomSock in room.Shape.Sockets)
+            {
+                if (roomSock == null)
+                    continue;
+                if (roomSock.Side != connSock.Side.Opposite())
+                    continue;
+
+                var roomWorld = room.Root + roomSock.CellOffset;
+                var delta = roomWorld - baseWorld;
+                var x = delta.x * inward.x + delta.y * inward.y;
+                if (x < 0 || x >= maxDepth)
+                    continue;
+                if (delta != inward * x)
+                    continue;
+
+                connectorSocketBaseWorld = baseWorld;
+                maxKInclusive = x;
+                return true;
+            }
+        }
+        return false;
     }
 
     private bool TryValidateGlobal(Dictionary<string, RoomPlacement> rooms, out string error)
@@ -110,19 +284,17 @@ public sealed partial class MapGraphLayoutGenerator
                 if (aFloor == null || bFloor == null || aWall == null || bWall == null)
                     continue;
 
+                TryGetBiteAllowance(a, b, out var allowedFloorOverlap, out var allowedWallA, out var allowedWallB);
+
                 var deltaBA = b.Root - a.Root;
-                var floorOverlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var overlapCellWorld, earlyStopAtTwo: true);
-                var allowedBite = floorOverlapCount == 1 && IsAllowedBiteOverlap(a, b, 1);
-                if (floorOverlapCount > 0 && !allowedBite)
+                var floorOverlapIllegal = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloorOverlap, a.Root, out var overlapCellWorld, earlyStopAtTwo: true);
+                if (floorOverlapIllegal > 0)
                 {
-                    error = $"Layout invalid: floor overlap between {a.NodeId} and {b.NodeId} (count={floorOverlapCount}, cell={overlapCellWorld}).";
+                    error = $"Layout invalid: floor overlap between {a.NodeId} and {b.NodeId} (count={floorOverlapIllegal}, cell={overlapCellWorld}).";
                     return false;
                 }
 
-                var allowedA = allowedBite ? AllowedWallOnFloorCells(a, b, overlapCellWorld) : AllowedWorldCells.None;
-                var allowedB = allowedBite ? AllowedWallOnFloorCells(b, a, overlapCellWorld) : AllowedWorldCells.None;
-
-                var wallOnFloorA = CountOverlapShifted(aWall, bFloor, deltaBA, allowedA, a.Root, out var badA, earlyStopAtTwo: true);
+                var wallOnFloorA = CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out var badA, earlyStopAtTwo: true);
                 if (wallOnFloorA > 0)
                 {
                     error = $"Layout invalid: wall({a.NodeId}) overlaps floor({b.NodeId}) at {badA}.";
@@ -130,7 +302,7 @@ public sealed partial class MapGraphLayoutGenerator
                 }
 
                 var deltaAB = a.Root - b.Root;
-                var wallOnFloorB = CountOverlapShifted(bWall, aFloor, deltaAB, allowedB, b.Root, out var badB, earlyStopAtTwo: true);
+                var wallOnFloorB = CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out var badB, earlyStopAtTwo: true);
                 if (wallOnFloorB > 0)
                 {
                     error = $"Layout invalid: wall({b.NodeId}) overlaps floor({a.NodeId}) at {badB}.";
@@ -159,16 +331,12 @@ public sealed partial class MapGraphLayoutGenerator
                 return false;
             }
 
-            var aFloor = a.Shape?.FloorCells;
-            var bFloor = b.Shape?.FloorCells;
-            if (aFloor == null || bFloor == null)
-                continue;
-
-            var deltaBA = b.Root - a.Root;
-            var overlapCount = CountOverlapShifted(aFloor, bFloor, deltaBA, AllowedWorldCells.None, a.Root, out var overlapCellWorld, earlyStopAtTwo: false);
-            if (overlapCount != 1)
+            // Additional bite-depth consistency check: the room socket must lie on the connector inward ray within BiteDepth.
+            var conn = IsConnector(a.Prefab) ? a : b;
+            var room = ReferenceEquals(conn, a) ? b : a;
+            if (!TryFindBiteDepth(conn, room, out _, out _, out _, out _))
             {
-                error = $"Layout invalid: edge {edge.fromNodeId}->{edge.toNodeId} expected 1-tile bite, got overlapCount={overlapCount} (cell={overlapCellWorld}).";
+                error = $"Layout invalid: edge {edge.fromNodeId}->{edge.toNodeId} has no matching bite-depth socket pair.";
                 return false;
             }
         }
@@ -210,17 +378,14 @@ public sealed partial class MapGraphLayoutGenerator
 
     private bool IsAllowedBiteOverlap(RoomPlacement a, RoomPlacement b, int overlapCount)
     {
+        // Kept for backward-compat / diagnostics; the new bite-depth rules no longer rely on overlapCount==1.
         if (a == null || b == null)
-            return false;
-        if (overlapCount != 1)
             return false;
         if (!AreNeighbors(a.NodeId, b.NodeId))
             return false;
         if (IsConnector(a.Prefab) == IsConnector(b.Prefab))
             return false;
-        if (!RoomsTouchEitherWay(a, b))
-            return false;
-        return true;
+        return RoomsTouchEitherWay(a, b);
     }
 
     private bool IsConnector(GameObject prefab)
@@ -272,21 +437,10 @@ public sealed partial class MapGraphLayoutGenerator
 
     private AllowedWorldCells AllowedWallOnFloorCells(RoomPlacement wallOwner, RoomPlacement floorOwner, Vector2Int biteCell)
     {
+        // Legacy helper retained for older call sites; bite-depth uses TryGetBiteAllowance instead.
         if (wallOwner == null || floorOwner == null)
             return AllowedWorldCells.None;
-
-        if (!IsConnector(wallOwner.Prefab) || IsConnector(floorOwner.Prefab))
-            return new AllowedWorldCells(biteCell);
-
-        if (!TryGetSocketSideAtWorldCell(wallOwner, biteCell, out var side) &&
-            !TryGetSocketSideAtWorldCell(floorOwner, biteCell, out side))
-        {
-            var delta = floorOwner.Root - wallOwner.Root;
-            side = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? DoorSide.East : DoorSide.North;
-        }
-
-        var tangent = side == DoorSide.North || side == DoorSide.South ? Vector2Int.right : Vector2Int.up;
-        return new AllowedWorldCells(biteCell, biteCell + tangent, biteCell - tangent);
+        return new AllowedWorldCells(biteCell);
     }
 
     private bool TryGetSocketSideAtWorldCell(RoomPlacement placement, Vector2Int worldCell, out DoorSide side)

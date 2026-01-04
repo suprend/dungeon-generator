@@ -70,12 +70,11 @@ public sealed class ShapeLibrary
                 if (sock == null) continue;
                 var sockCell = stamp.CellFromWorld(sock.transform.position);
                 var localCell = new Vector2Int(sockCell.x - rootCell.x, sockCell.y - rootCell.y);
-                // Strict "1-tile bite" uses overlap on the socket cell.
-                // Rooms often have a wall tile at the socket location (door is carved later),
-                // so treat the socket cell as solid/floor for configuration space purposes.
+                // Treat socket cell as "floor-capable" for configuration-space/layout.
+                // Room prefabs may still have a wall tile at that cell; the actual door is carved only when the socket is used.
                 floorCells.Add(localCell);
                 var contact = BuildContactStrip(localCell, sock.Side, sock.Width);
-                sockets.Add(new ShapeSocket(sock.Side, sock.Width, localCell, contact));
+                sockets.Add(new ShapeSocket(sock.Side, sock.Width, sock.BiteDepth, localCell, contact));
             }
         }
 

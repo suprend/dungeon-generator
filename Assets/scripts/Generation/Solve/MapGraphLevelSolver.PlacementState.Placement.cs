@@ -67,6 +67,11 @@ public partial class MapGraphLevelSolver
 
         private bool PreplaceLayoutRooms(MapGraphLayoutGenerator.LayoutResult layout, Vector3Int offset, MapGraphAsset graph)
         {
+            if (!TryBuildConnectorCarvePlan(layout, offset, graph, out var connectorCarvePlan))
+                return false;
+            if (!TryBuildRoomDoorCarvePlan(layout, offset, graph, out var roomDoorCarvePlan))
+                return false;
+
             foreach (var kv in layout.Rooms)
             {
                 var room = kv.Value;
@@ -104,7 +109,24 @@ public partial class MapGraphLevelSolver
                     return false;
                 }
 
-                CarveConnectorEntranceWalls(placement);
+                if (placement.Meta is ConnectorMeta &&
+                    connectorCarvePlan.TryGetValue(room.NodeId, out var carveInstr) &&
+                    carveInstr != null)
+                {
+                    for (var i = 0; i < carveInstr.Count; i++)
+                    {
+                        var ci = carveInstr[i];
+                        CarveConnectorBiteRays(placement.FloorCells, placement.WallCells, ci.SocketBaseCell, ci.Side, ci.DepthX);
+                    }
+                }
+
+                if (placement.Meta is not ConnectorMeta &&
+                    roomDoorCarvePlan.TryGetValue(room.NodeId, out var doorCells) &&
+                    doorCells != null)
+                {
+                    foreach (var doorCell in doorCells)
+                        CarveRoomDoorCell(placement, doorCell, updateOccupancy: false);
+                }
 
                 if (OverlapsOutsideAllowedSockets(room.NodeId, placement, graph))
                 {
@@ -162,70 +184,60 @@ public partial class MapGraphLevelSolver
 
         private bool OverlapsOutsideAllowedSockets(string nodeId, Placement placement, MapGraphAsset graph)
         {
-            // Allow overlap only at the bite cell for each satisfied Room↔Corridor edge.
-            // Additionally, allow connector side-wall cells adjacent to the bite cell to overlap room floors.
+            // Allow floor↔floor overlap only at the satisfied "door cell" between a room and a connector.
             var allowedFloorOverlap = new HashSet<Vector3Int>();
-            var allowedFloorOnWall = new HashSet<Vector3Int>();
-            var allowedWallOnFloor = new HashSet<Vector3Int>();
-            var placementIsConnector = placement?.Meta is ConnectorMeta;
 
-            static IEnumerable<Vector3Int> SideBiteCells(Vector3Int biteCell, DoorSide side)
+            if (graph != null && placement?.Meta != null)
             {
-                var tangent = side == DoorSide.North || side == DoorSide.South ? Vector3Int.right : Vector3Int.up;
-                yield return biteCell + tangent;
-                yield return biteCell - tangent;
-            }
-
-            foreach (var edge in graph.Edges)
-            {
-                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
-                    continue;
-                var aId = edge.fromNodeId;
-                var bId = edge.toNodeId;
-                if (aId != nodeId && bId != nodeId)
-                    continue;
-
-                var otherId = aId == nodeId ? bId : aId;
-                if (!placedNodes.TryGetValue(otherId, out var otherPlacement) || otherPlacement?.Meta == null)
-                    continue;
-
-                // Find aligned sockets between placement and otherPlacement
-                foreach (var sockA in placement.Meta.Sockets ?? Array.Empty<DoorSocket>())
+                foreach (var edge in graph.Edges)
                 {
-                    if (sockA == null) continue;
-                    var cellA = stamp.CellFromWorld(sockA.transform.position);
-                    foreach (var sockB in otherPlacement.Meta.Sockets ?? Array.Empty<DoorSocket>())
+                    if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                        continue;
+                    var aId = edge.fromNodeId;
+                    var bId = edge.toNodeId;
+                    if (aId != nodeId && bId != nodeId)
+                        continue;
+
+                    var otherId = aId == nodeId ? bId : aId;
+                    if (!placedNodes.TryGetValue(otherId, out var otherPlacement) || otherPlacement?.Meta == null)
+                        continue;
+
+                    var placementIsConnector = placement.Meta is ConnectorMeta;
+                    var otherIsConnector = otherPlacement.Meta is ConnectorMeta;
+                    if (placementIsConnector == otherIsConnector)
+                        continue;
+
+                    var connPlacement = placementIsConnector ? placement : otherPlacement;
+                    var roomPlacement = placementIsConnector ? otherPlacement : placement;
+
+                    foreach (var connSock in connPlacement.Meta.Sockets ?? Array.Empty<DoorSocket>())
                     {
-                        if (sockB == null) continue;
-                        if (sockA.Side != sockB.Side.Opposite()) continue;
-                        var cellB = stamp.CellFromWorld(sockB.transform.position);
-                        if (cellA != cellB) continue;
-
-                        allowedFloorOverlap.Add(cellA);
-                        allowedFloorOnWall.Add(cellA);
-                        allowedWallOnFloor.Add(cellA);
-
-                        if (placementIsConnector)
+                        if (connSock == null)
+                            continue;
+                        foreach (var roomSock in roomPlacement.Meta.Sockets ?? Array.Empty<DoorSocket>())
                         {
-                            foreach (var c in SideBiteCells(cellA, sockA.Side))
-                                allowedWallOnFloor.Add(c);
+                            if (roomSock == null)
+                                continue;
+                            if (!TryComputeBiteDepth(connSock, roomSock, out _))
+                                continue;
+                            // roomSock cell is exactly the chosen door cell.
+                            allowedFloorOverlap.Add(stamp.CellFromWorld(roomSock.transform.position));
                         }
                     }
                 }
             }
 
-            // Floors cannot overlap floors except allowed; walls cannot overlap floors; floors cannot overlap walls unless allowed.
             if (HasOverlap(placement.FloorCells, occupiedFloor, allowedFloorOverlap))
             {
                 LastError = $"Layout room {placement.Prefab.name} overlaps existing floors.";
                 return true;
             }
-            if (HasOverlap(placement.WallCells, occupiedFloor, allowedWallOnFloor))
+            if (HasOverlap(placement.WallCells, occupiedFloor))
             {
                 LastError = $"Layout room {placement.Prefab.name} walls overlap existing floors.";
                 return true;
             }
-            if (HasOverlap(placement.FloorCells, occupiedWall, allowedFloorOnWall))
+            if (HasOverlap(placement.FloorCells, occupiedWall))
             {
                 LastError = $"Layout room {placement.Prefab.name} floors overlap existing walls.";
                 return true;
@@ -233,29 +245,303 @@ public partial class MapGraphLevelSolver
             return false;
         }
 
-        private void CarveConnectorEntranceWalls(Placement placement, IEnumerable<DoorSocket> socketsOverride = null)
+        private readonly struct ConnectorCarveInstruction
         {
-            if (placement?.Meta is not ConnectorMeta)
-                return;
+            public Vector3Int SocketBaseCell { get; }
+            public DoorSide Side { get; }
+            public int DepthX { get; }
 
-            var sockets = socketsOverride ?? (placement.Meta.Sockets ?? Array.Empty<DoorSocket>());
-            foreach (var sock in sockets)
+            public ConnectorCarveInstruction(Vector3Int socketBaseCell, DoorSide side, int depthX)
             {
-                if (sock == null)
-                    continue;
-                var biteCell = stamp.CellFromWorld(sock.transform.position);
-                CarveConnectorEntranceWalls(placement.WallCells, biteCell, sock.Side);
+                SocketBaseCell = socketBaseCell;
+                Side = side;
+                DepthX = Mathf.Max(0, depthX);
             }
         }
 
-        private void CarveConnectorEntranceWalls(HashSet<Vector3Int> connectorWalls, Vector3Int biteCell, DoorSide side)
+        private static Vector3Int InwardVector(DoorSide side)
         {
-            if (connectorWalls == null)
+            return side switch
+            {
+                DoorSide.North => Vector3Int.down,
+                DoorSide.South => Vector3Int.up,
+                DoorSide.East => Vector3Int.left,
+                DoorSide.West => Vector3Int.right,
+                _ => Vector3Int.down
+            };
+        }
+
+        private static Vector3Int TangentVector(DoorSide side)
+        {
+            return side == DoorSide.North || side == DoorSide.South ? Vector3Int.right : Vector3Int.up;
+        }
+
+        private static void CarveConnectorBiteRays(HashSet<Vector3Int> connectorFloors, HashSet<Vector3Int> connectorWalls, Vector3Int socketBaseCell, DoorSide side, int depthX)
+        {
+            if (connectorFloors == null || connectorWalls == null)
                 return;
 
-            var tangent = side == DoorSide.North || side == DoorSide.South ? Vector3Int.right : Vector3Int.up;
-            connectorWalls.Remove(biteCell + tangent);
-            connectorWalls.Remove(biteCell - tangent);
+            var inward = InwardVector(side);
+            var tangent = TangentVector(side);
+            var maxK = Mathf.Max(0, depthX);
+
+            for (var k = 0; k <= maxK; k++)
+            {
+                var center = socketBaseCell + inward * k;
+                var left = center + tangent;
+                var right = center - tangent;
+
+                // Keep connector floor at the final door cell (k == depthX) to avoid "holes" when the room has no floor tile there.
+                if (k < maxK)
+                    connectorFloors.Remove(center);
+                connectorWalls.Remove(center);
+
+                connectorFloors.Remove(left);
+                connectorWalls.Remove(left);
+                connectorFloors.Remove(right);
+                connectorWalls.Remove(right);
+            }
+        }
+
+        private void CarveRoomDoorCell(Placement roomPlacement, Vector3Int doorCell, bool updateOccupancy)
+        {
+            if (roomPlacement?.Meta == null)
+                return;
+            if (roomPlacement.Meta is ConnectorMeta)
+                return;
+
+            roomPlacement.WallCells.Remove(doorCell);
+            roomPlacement.FloorCells.Add(doorCell);
+
+            if (updateOccupancy)
+            {
+                occupiedWall.Remove(doorCell);
+                occupiedFloor.Add(doorCell);
+            }
+        }
+
+        private void CarveConnectorBiteRays(Placement connectorPlacement, Vector3Int socketBaseCell, DoorSide side, int depthX, bool updateOccupancy)
+        {
+            if (connectorPlacement?.Meta == null)
+                return;
+            if (connectorPlacement.Meta is not ConnectorMeta)
+                return;
+
+            var inward = InwardVector(side);
+            var tangent = TangentVector(side);
+            var maxK = Mathf.Max(0, depthX);
+
+            for (var k = 0; k <= maxK; k++)
+            {
+                var center = socketBaseCell + inward * k;
+                var left = center + tangent;
+                var right = center - tangent;
+
+                if (k < maxK)
+                    connectorPlacement.FloorCells.Remove(center);
+                connectorPlacement.WallCells.Remove(center);
+                connectorPlacement.FloorCells.Remove(left);
+                connectorPlacement.WallCells.Remove(left);
+                connectorPlacement.FloorCells.Remove(right);
+                connectorPlacement.WallCells.Remove(right);
+
+                if (updateOccupancy)
+                {
+                    if (k < maxK)
+                        occupiedFloor.Remove(center);
+                    occupiedWall.Remove(center);
+                    occupiedFloor.Remove(left);
+                    occupiedWall.Remove(left);
+                    occupiedFloor.Remove(right);
+                    occupiedWall.Remove(right);
+                }
+            }
+        }
+
+        private bool TryComputeBiteDepth(DoorSocket connectorSocket, DoorSocket roomSocket, out int depthX)
+        {
+            depthX = 0;
+            if (connectorSocket == null || roomSocket == null || stamp == null)
+                return false;
+            if (roomSocket.Side != connectorSocket.Side.Opposite())
+                return false;
+
+            var baseCell = stamp.CellFromWorld(connectorSocket.transform.position);
+            var roomCell = stamp.CellFromWorld(roomSocket.transform.position);
+            var inward = InwardVector(connectorSocket.Side);
+            var delta = roomCell - baseCell;
+            var x = delta.x * inward.x + delta.y * inward.y;
+            if (x < 0 || x >= Mathf.Max(1, connectorSocket.BiteDepth))
+                return false;
+            if (delta != inward * x)
+                return false;
+
+            depthX = x;
+            return true;
+        }
+
+        private bool TryBuildConnectorCarvePlan(
+            MapGraphLayoutGenerator.LayoutResult layout,
+            Vector3Int offset,
+            MapGraphAsset graph,
+            out Dictionary<string, List<ConnectorCarveInstruction>> carvePlan)
+        {
+            carvePlan = new Dictionary<string, List<ConnectorCarveInstruction>>();
+            if (layout == null || graph == null)
+            {
+                LastError = "Missing layout or graph for carve plan.";
+                return false;
+            }
+
+            var offset2 = new Vector2Int(offset.x, offset.y);
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                if (!layout.Rooms.TryGetValue(edge.fromNodeId, out var a) || a == null)
+                {
+                    LastError = $"Carve plan: missing layout node {edge.fromNodeId}.";
+                    return false;
+                }
+                if (!layout.Rooms.TryGetValue(edge.toNodeId, out var b) || b == null)
+                {
+                    LastError = $"Carve plan: missing layout node {edge.toNodeId}.";
+                    return false;
+                }
+
+                var aIsConnector = a.Prefab != null && a.Prefab.GetComponent<ConnectorMeta>() != null;
+                var bIsConnector = b.Prefab != null && b.Prefab.GetComponent<ConnectorMeta>() != null;
+                if (aIsConnector == bIsConnector)
+                    continue;
+
+                var conn = aIsConnector ? a : b;
+                var room = aIsConnector ? b : a;
+
+                if (!TryFindLayoutBiteDepth(conn, room, offset2, out var baseCell, out var side, out var depthX))
+                {
+                    LastError = $"Carve plan: cannot match bite depth for edge {edge.fromNodeId}->{edge.toNodeId}.";
+                    return false;
+                }
+
+                if (!carvePlan.TryGetValue(conn.NodeId, out var list))
+                {
+                    list = new List<ConnectorCarveInstruction>();
+                    carvePlan[conn.NodeId] = list;
+                }
+                list.Add(new ConnectorCarveInstruction(baseCell, side, depthX));
+            }
+
+            return true;
+        }
+
+        private bool TryBuildRoomDoorCarvePlan(
+            MapGraphLayoutGenerator.LayoutResult layout,
+            Vector3Int offset,
+            MapGraphAsset graph,
+            out Dictionary<string, HashSet<Vector3Int>> roomDoorCarvePlan)
+        {
+            roomDoorCarvePlan = new Dictionary<string, HashSet<Vector3Int>>();
+            if (layout == null || graph == null)
+            {
+                LastError = "Missing layout or graph for room door carve plan.";
+                return false;
+            }
+
+            var offset2 = new Vector2Int(offset.x, offset.y);
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+                if (!layout.Rooms.TryGetValue(edge.fromNodeId, out var a) || a == null)
+                {
+                    LastError = $"Room door carve plan: missing layout node {edge.fromNodeId}.";
+                    return false;
+                }
+                if (!layout.Rooms.TryGetValue(edge.toNodeId, out var b) || b == null)
+                {
+                    LastError = $"Room door carve plan: missing layout node {edge.toNodeId}.";
+                    return false;
+                }
+
+                var aIsConnector = a.Prefab != null && a.Prefab.GetComponent<ConnectorMeta>() != null;
+                var bIsConnector = b.Prefab != null && b.Prefab.GetComponent<ConnectorMeta>() != null;
+                if (aIsConnector == bIsConnector)
+                    continue;
+
+                var conn = aIsConnector ? a : b;
+                var room = aIsConnector ? b : a;
+
+                if (!TryFindLayoutBiteDepth(conn, room, offset2, out var baseCell, out var side, out var depthX))
+                {
+                    LastError = $"Room door carve plan: cannot match bite depth for edge {edge.fromNodeId}->{edge.toNodeId}.";
+                    return false;
+                }
+
+                var doorCell = baseCell + InwardVector(side) * depthX;
+                if (!roomDoorCarvePlan.TryGetValue(room.NodeId, out var set))
+                {
+                    set = new HashSet<Vector3Int>();
+                    roomDoorCarvePlan[room.NodeId] = set;
+                }
+                set.Add(doorCell);
+            }
+
+            return true;
+        }
+
+        private bool TryFindLayoutBiteDepth(
+            MapGraphLayoutGenerator.RoomPlacement connector,
+            MapGraphLayoutGenerator.RoomPlacement room,
+            Vector2Int offset,
+            out Vector3Int connectorSocketBaseCell,
+            out DoorSide connectorSide,
+            out int depthX)
+        {
+            connectorSocketBaseCell = default;
+            connectorSide = default;
+            depthX = 0;
+
+            if (connector?.Shape?.Sockets == null || room?.Shape?.Sockets == null)
+                return false;
+            if (connector.Prefab == null || room.Prefab == null)
+                return false;
+
+            var connRoot = connector.Root + offset;
+            var roomRoot = room.Root + offset;
+
+            foreach (var connSock in connector.Shape.Sockets)
+            {
+                if (connSock == null)
+                    continue;
+                var inward = new Vector2Int(InwardVector(connSock.Side).x, InwardVector(connSock.Side).y);
+                var baseCell2 = connRoot + connSock.CellOffset;
+                var maxDepth = Mathf.Max(1, connSock.BiteDepth);
+
+                foreach (var roomSock in room.Shape.Sockets)
+                {
+                    if (roomSock == null)
+                        continue;
+                    if (roomSock.Side != connSock.Side.Opposite())
+                        continue;
+
+                    var roomCell2 = roomRoot + roomSock.CellOffset;
+                    var delta = roomCell2 - baseCell2;
+                    var x = delta.x * inward.x + delta.y * inward.y;
+                    if (x < 0 || x >= maxDepth)
+                        continue;
+                    if (delta != inward * x)
+                        continue;
+
+                    connectorSocketBaseCell = new Vector3Int(baseCell2.x, baseCell2.y, 0);
+                    connectorSide = connSock.Side;
+                    depthX = x;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryPlaceEdge(string anchorId, string targetId, MapGraphAsset.EdgeData edge, MapGraphAsset graph, Func<bool> continueAfterPlacement)
@@ -285,7 +571,7 @@ public partial class MapGraphLevelSolver
 
             var anchorMeta = anchorPlacement.Meta;
             var anchorSockets = anchorMeta.Sockets != null
-                ? anchorMeta.Sockets.Where(s => s && !usedSockets.Contains(s)).ToList()
+                ? anchorMeta.Sockets.Where(s => s && !IsSocketBlocked(anchorMeta, s)).ToList()
                 : new List<DoorSocket>();
             anchorSockets.Shuffle(rng);
             if (anchorSockets.Count == 0)
@@ -327,160 +613,168 @@ public partial class MapGraphLevelSolver
 
                     foreach (var s1 in s1Candidates)
                     {
-                        var connRootCell = anchorCell - s1.CellOffset;
-                        BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
-                        CarveConnectorEntranceWalls(connWalls, anchorCell, s1.Side);
-                        var allowedAnchorStrip = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
-                        if (HasOverlap(connFloors, occupiedFloor, allowedAnchorStrip))
-                            continue;
-
-                        var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
-                        s2Candidates.Shuffle(rng);
-                        if (s2Candidates.Count == 0)
+                        var maxDepth1 = Mathf.Max(1, s1.BiteDepth);
+                        for (var depthX1 = 0; depthX1 < maxDepth1; depthX1++)
                         {
-                            LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
-                            continue;
-                        }
+                            var connRootCell = anchorCell - (s1.CellOffset + InwardVector(s1.Side) * depthX1);
+                            BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloorsBase, out var connWallsBase);
+                            CarveConnectorBiteRays(connFloorsBase, connWallsBase, connRootCell + s1.CellOffset, s1.Side, depthX1);
 
-                        foreach (var s2 in s2Candidates)
-                        {
-                            var s2Cell = connRootCell + s2.CellOffset;
-                            CarveConnectorEntranceWalls(connWalls, s2Cell, s2.Side);
-                            var roomPrefabs = GetRoomPrefabs(targetRoomType, s2.Side.Opposite(), s2.Width, out var roomPrefabsError);
-                            roomPrefabs.Shuffle(rng);
-                            if (roomPrefabs.Count == 0)
+                            var allowedAnchorStrip = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
+                            if (HasOverlap(connFloorsBase, occupiedFloor, allowedAnchorStrip))
+                                continue;
+
+                            var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
+                            s2Candidates.Shuffle(rng);
+                            if (s2Candidates.Count == 0)
                             {
-                                LastError = roomPrefabsError ?? $"Room type {targetRoomType.name} has no prefabs.";
+                                LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
                                 continue;
                             }
 
-                            foreach (var roomPrefab in roomPrefabs)
+                            foreach (var s2 in s2Candidates)
                             {
-                                if (!HasConfigSpace(connPrefab, roomPrefab))
-                                    continue;
-                                if (!TryGetBlueprint(roomPrefab, out var roomBlueprint, out var roomBpError))
+                                var maxDepth2 = Mathf.Max(1, s2.BiteDepth);
+                                for (var depthX2 = 0; depthX2 < maxDepth2; depthX2++)
                                 {
-                                    LastError ??= roomBpError;
-                                    continue;
-                                }
+                                    var connFloors = new HashSet<Vector3Int>(connFloorsBase);
+                                    var connWalls = new HashSet<Vector3Int>(connWallsBase);
+                                    var s2BaseCell = connRootCell + s2.CellOffset;
+                                    CarveConnectorBiteRays(connFloors, connWalls, s2BaseCell, s2.Side, depthX2);
 
-                                var roomSock = roomBlueprint.Sockets.FirstOrDefault(s =>
-                                    s.Side == s2.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(s2.Width));
-                                if (roomSock == null)
-                                {
-                                    LastError ??= $"Room prefab {roomPrefab.name} missing socket for side {s2.Side.Opposite()} width {NormalizeWidth(s2.Width)}.";
-                                    continue;
-                                }
+                                    var roomPrefabs = GetRoomPrefabs(targetRoomType, s2.Side.Opposite(), s2.Width, out var roomPrefabsError);
+                                    roomPrefabs.Shuffle(rng);
+                                    if (roomPrefabs.Count == 0)
+                                    {
+                                        LastError = roomPrefabsError ?? $"Room type {targetRoomType.name} has no prefabs.";
+                                        continue;
+                                    }
 
-                                var roomRootCell = s2Cell - roomSock.CellOffset;
-                                if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
-                                {
-                                    LastError ??= $"Config space empty for {connPrefab.name}->{roomPrefab.name}.";
-                                    continue;
-                                }
-                                BuildPlacementFromBlueprint(roomBlueprint, roomRootCell, out var roomFloors, out var roomWalls);
+                                    foreach (var roomPrefab in roomPrefabs)
+                                    {
+                                        if (!HasConfigSpace(connPrefab, roomPrefab))
+                                            continue;
+                                        if (!TryGetBlueprint(roomPrefab, out var roomBlueprint, out var roomBpError))
+                                        {
+                                            LastError ??= roomBpError;
+                                            continue;
+                                        }
 
-                                // Overlap checks
-                                var allowedRoomFloor = new HashSet<Vector3Int>(connFloors);
-                                allowedRoomFloor.Add(s2Cell);
-                                if (HasOverlap(roomFloors, occupiedFloor, allowedRoomFloor))
-                                {
-                                    LastError ??= $"Room {roomPrefab.name} floor overlaps on edge {anchorId}->{targetId}.";
-                                    continue;
-                                }
-                                var allowedRoomWallReplace = new HashSet<Vector3Int>(connFloors);
-                                if (HasOverlap(roomWalls, occupiedWall, allowedRoomWallReplace))
-                                {
-                                    LastError ??= $"Room {roomPrefab.name} walls overlap on edge {anchorId}->{targetId}.";
-                                    continue;
-                                }
+                                        var roomSock = roomBlueprint.Sockets.FirstOrDefault(s =>
+                                            s.Side == s2.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(s2.Width));
+                                        if (roomSock == null)
+                                        {
+                                            LastError ??= $"Room prefab {roomPrefab.name} missing socket for side {s2.Side.Opposite()} width {NormalizeWidth(s2.Width)}.";
+                                            continue;
+                                        }
 
-                                var allowedConnectorWallReplace = new HashSet<Vector3Int>();
-                                if (anchorPlacement != null)
-                                    foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                foreach (var wc in roomWalls) allowedConnectorWallReplace.Add(wc);
-                                if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
-                                {
-                                    LastError ??= $"Connector walls overlap on edge {anchorId}->{targetId}.";
-                                    continue;
-                                }
+                                        var s2TargetCell = s2BaseCell + InwardVector(s2.Side) * depthX2;
+                                        var roomRootCell = s2TargetCell - roomSock.CellOffset;
+                                        if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
+                                        {
+                                            LastError ??= $"Config space empty for {connPrefab.name}->{roomPrefab.name}.";
+                                            continue;
+                                        }
+                                        BuildPlacementFromBlueprint(roomBlueprint, roomRootCell, out var roomFloors, out var roomWalls);
 
-                                int depthBeforeConn = placementStack.Count;
-                                // Instantiate and commit after math checks pass
-                                var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                                var connMeta = connInst.GetComponent<ConnectorMeta>();
-                                if (connMeta == null)
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
-                                connMeta.ResetUsed();
-                                AlignToCell(connInst.transform, connRootCell);
-                                if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
-                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
+                                        if (HasOverlap(roomFloors, occupiedFloor) || HasOverlap(roomWalls, occupiedFloor) || HasOverlap(roomFloors, occupiedWall))
+                                        {
+                                            LastError ??= $"Room {roomPrefab.name} overlaps on edge {anchorId}->{targetId}.";
+                                            continue;
+                                        }
 
-                                var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
-                                var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
-                                if (s1Actual == null || s2Actual == null)
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
+                                        var allowedConnectorWallReplace = new HashSet<Vector3Int>();
+                                        if (anchorPlacement != null)
+                                            foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
+                                        if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
+                                        {
+                                            LastError ??= $"Connector walls overlap on edge {anchorId}->{targetId}.";
+                                            continue;
+                                        }
+
+                                        int depthBeforeConn = placementStack.Count;
+                                        // Instantiate and commit after math checks pass
+                                        var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                        var connMeta = connInst.GetComponent<ConnectorMeta>();
+                                        if (connMeta == null)
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            continue;
+                                        }
+                                        connMeta.ResetUsed();
+                                        AlignToCell(connInst.transform, connRootCell);
+                                        if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            continue;
+                                        }
+                                        if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            continue;
+                                        }
+
+                                        var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
+                                        var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
+                                        if (s1Actual == null || s2Actual == null)
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            continue;
+                                        }
+
+                                        CarveConnectorBiteRays(connPlacement.FloorCells, connPlacement.WallCells, stamp.CellFromWorld(s1Actual.transform.position), s1Actual.Side, depthX1);
+                                        CarveConnectorBiteRays(connPlacement.FloorCells, connPlacement.WallCells, stamp.CellFromWorld(s2Actual.transform.position), s2Actual.Side, depthX2);
+
+                                        var roomInst = UnityEngine.Object.Instantiate(roomPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                        var roomMeta = roomInst.GetComponent<RoomMeta>();
+                                        if (roomMeta == null)
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            UnityEngine.Object.Destroy(roomInst);
+                                            continue;
+                                        }
+                                        roomMeta.ResetUsed();
+                                        AlignToCell(roomInst.transform, roomRootCell);
+                                        if (!TryComputePlacement(roomMeta, roomPrefab, out var roomPlacement))
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            UnityEngine.Object.Destroy(roomInst);
+                                            continue;
+                                        }
+                                        if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            UnityEngine.Object.Destroy(roomInst);
+                                            continue;
+                                        }
+
+                                        var roomSockActual = FindSocketAtCell(roomMeta.Sockets, roomSock, roomRootCell);
+                                        if (roomSockActual == null)
+                                        {
+                                            UnityEngine.Object.Destroy(connInst);
+                                            UnityEngine.Object.Destroy(roomInst);
+                                            continue;
+                                        }
+
+                                        // Carve doors only for actually-used room sockets.
+                                        CarveRoomDoorCell(anchorPlacement, anchorCell, updateOccupancy: true);
+                                        CarveRoomDoorCell(roomPlacement, stamp.CellFromWorld(roomSockActual.transform.position), updateOccupancy: false);
+
+                                        connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock });
+                                        roomPlacement.UsedSockets.Add(roomSockActual);
+                                        connPlacement.EdgeKey = key;
+
+                                        CommitPlacement(null, connPlacement);
+                                        CommitPlacement(targetId, roomPlacement);
+                                        placedEdges.Add(key);
+
+                                        var success = continueAfterPlacement == null || continueAfterPlacement();
+                                        if (success)
+                                            return true;
+
+                                        RollbackToDepth(depthBeforeConn);
+                                    }
                                 }
-
-                                CarveConnectorEntranceWalls(connPlacement, new[] { s1Actual, s2Actual });
-
-                                var roomInst = UnityEngine.Object.Instantiate(roomPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                                var roomMeta = roomInst.GetComponent<RoomMeta>();
-                                if (roomMeta == null)
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    UnityEngine.Object.Destroy(roomInst);
-                                    continue;
-                                }
-                                roomMeta.ResetUsed();
-                                AlignToCell(roomInst.transform, roomRootCell);
-                                if (!TryComputePlacement(roomMeta, roomPrefab, out var roomPlacement))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    UnityEngine.Object.Destroy(roomInst);
-                                    continue;
-                                }
-                                if (!FitsConfigSpace(connPrefab, roomPrefab, connRootCell, roomRootCell))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    UnityEngine.Object.Destroy(roomInst);
-                                    continue;
-                                }
-
-                                var roomSockActual = FindSocketAtCell(roomMeta.Sockets, roomSock, roomRootCell);
-                                if (roomSockActual == null)
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    UnityEngine.Object.Destroy(roomInst);
-                                    continue;
-                                }
-
-                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock });
-                                roomPlacement.UsedSockets.Add(roomSockActual);
-                                connPlacement.EdgeKey = key;
-
-                                CommitPlacement(null, connPlacement);
-                                CommitPlacement(targetId, roomPlacement);
-                                placedEdges.Add(key);
-
-                                var success = continueAfterPlacement == null || continueAfterPlacement();
-                                if (success)
-                                    return true;
-
-                                RollbackToDepth(depthBeforeConn);
                             }
                         }
                     }
@@ -518,7 +812,7 @@ public partial class MapGraphLevelSolver
             var targetPrefab = targetPlacement.Prefab;
 
             var anchorSockets = anchorPlacement.Meta.Sockets != null
-                ? anchorPlacement.Meta.Sockets.Where(s => s && !usedSockets.Contains(s)).ToList()
+                ? anchorPlacement.Meta.Sockets.Where(s => s && !IsSocketBlocked(anchorPlacement.Meta, s)).ToList()
                 : new List<DoorSocket>();
             anchorSockets.Shuffle(rng);
             if (anchorSockets.Count == 0)
@@ -528,7 +822,7 @@ public partial class MapGraphLevelSolver
             }
 
             var targetSockets = targetPlacement.Meta.Sockets != null
-                ? targetPlacement.Meta.Sockets.Where(s => s && !usedSockets.Contains(s)).ToList()
+                ? targetPlacement.Meta.Sockets.Where(s => s && !IsSocketBlocked(targetPlacement.Meta, s)).ToList()
                 : new List<DoorSocket>();
             targetSockets.Shuffle(rng);
             if (targetSockets.Count == 0)
@@ -537,22 +831,64 @@ public partial class MapGraphLevelSolver
                 return false;
             }
 
-            // Fast path: if rooms already satisfy config-space and have aligned sockets, mark edge placed without connector.
+            // Fast path: if endpoints already satisfy config-space and socket constraints, mark edge placed without inserting a connector.
             if (FitsConfigSpace(anchorPrefab, targetPrefab, anchorPlacement.RootCell, targetPlacement.RootCell))
             {
-                foreach (var aSock in anchorSockets)
-                {
-                    var aCell = stamp.CellFromWorld(aSock.transform.position);
-                    foreach (var tSock in targetSockets.Where(s => s.Side == aSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(aSock.Width)))
-                    {
-                        var tCell = stamp.CellFromWorld(tSock.transform.position);
-                        if (aCell != tCell)
-                            continue;
+                var anchorIsConnector = anchorPlacement.Meta is ConnectorMeta;
+                var targetIsConnector = targetPlacement.Meta is ConnectorMeta;
 
-                        usedSockets.Add(aSock);
-                        usedSockets.Add(tSock);
-                        placedEdges.Add(key);
-                        return continueAfterPlacement == null || continueAfterPlacement();
+                if (anchorIsConnector != targetIsConnector)
+                {
+                    var connSockets = anchorIsConnector ? anchorSockets : targetSockets;
+                    var roomSockets = anchorIsConnector ? targetSockets : anchorSockets;
+                    var connPlacement = anchorIsConnector ? anchorPlacement : targetPlacement;
+                    var roomPlacement = anchorIsConnector ? targetPlacement : anchorPlacement;
+
+                    foreach (var connSock in connSockets)
+                    {
+                        if (connSock == null)
+                            continue;
+                        foreach (var roomSock in roomSockets.Where(s =>
+                                     s != null &&
+                                     s.Side == connSock.Side.Opposite() &&
+                                     NormalizeWidth(s.Width) == NormalizeWidth(connSock.Width)))
+                        {
+                            if (!TryComputeBiteDepth(connSock, roomSock, out _))
+                                continue;
+
+                            // Apply "used door" carve on the room, and bite-cut on the connector.
+                            TryComputeBiteDepth(connSock, roomSock, out var depthX);
+                            CarveRoomDoorCell(roomPlacement, stamp.CellFromWorld(roomSock.transform.position), updateOccupancy: true);
+                            CarveConnectorBiteRays(connPlacement, stamp.CellFromWorld(connSock.transform.position), connSock.Side, depthX, updateOccupancy: true);
+
+                            MarkSocketUsed(connSock);
+                            MarkSocketUsed(roomSock);
+                            AddUsedSocketToPlacement(connPlacement, connSock);
+                            AddUsedSocketToPlacement(roomPlacement, roomSock);
+                            placedEdges.Add(key);
+                            return continueAfterPlacement == null || continueAfterPlacement();
+                        }
+                    }
+                }
+                else
+                {
+                    // Legacy fallback: require exact aligned socket cells.
+                    foreach (var aSock in anchorSockets)
+                    {
+                        var aCell = stamp.CellFromWorld(aSock.transform.position);
+                        foreach (var tSock in targetSockets.Where(s => s.Side == aSock.Side.Opposite() && NormalizeWidth(s.Width) == NormalizeWidth(aSock.Width)))
+                        {
+                            var tCell = stamp.CellFromWorld(tSock.transform.position);
+                            if (aCell != tCell)
+                                continue;
+
+                            MarkSocketUsed(aSock);
+                            MarkSocketUsed(tSock);
+                            AddUsedSocketToPlacement(anchorPlacement, aSock);
+                            AddUsedSocketToPlacement(targetPlacement, tSock);
+                            placedEdges.Add(key);
+                            return continueAfterPlacement == null || continueAfterPlacement();
+                        }
                     }
                 }
             }
@@ -590,89 +926,105 @@ public partial class MapGraphLevelSolver
 
                     foreach (var s1 in s1Candidates)
                     {
-                        var connRootCell = anchorCell - s1.CellOffset;
-                        BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloors, out var connWalls);
-                        CarveConnectorEntranceWalls(connWalls, anchorCell, s1.Side);
-
-                        var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
-                        s2Candidates.Shuffle(rng);
-                        if (s2Candidates.Count == 0)
+                        var maxDepth1 = Mathf.Max(1, s1.BiteDepth);
+                        for (var depthX1 = 0; depthX1 < maxDepth1; depthX1++)
                         {
-                            LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
-                            continue;
-                        }
+                            var connRootCell = anchorCell - (s1.CellOffset + InwardVector(s1.Side) * depthX1);
+                            BuildPlacementFromBlueprint(connBlueprint, connRootCell, out var connFloorsBase, out var connWallsBase);
+                            CarveConnectorBiteRays(connFloorsBase, connWallsBase, connRootCell + s1.CellOffset, s1.Side, depthX1);
 
-                        foreach (var s2 in s2Candidates)
-                        {
-                            foreach (var targetSock in targetSockets.Where(ts =>
-                                         ts.Side == s2.Side.Opposite() &&
-                                         NormalizeWidth(ts.Width) == NormalizeWidth(s2.Width)))
+                            var s2Candidates = connBlueprint.Sockets.Where(s => s != s1).ToList();
+                            s2Candidates.Shuffle(rng);
+                            if (s2Candidates.Count == 0)
                             {
-                                var targetCell = stamp.CellFromWorld(targetSock.transform.position);
-                                var s2Cell = connRootCell + s2.CellOffset;
-                                if (s2Cell != targetCell)
-                                    continue;
+                                LastError ??= $"Connector {connPrefab.name} has no secondary sockets for edge {anchorId}->{targetId}.";
+                                continue;
+                            }
 
-                                CarveConnectorEntranceWalls(connWalls, targetCell, s2.Side);
-
-                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
-                                    continue;
-                                if (!FitsConfigSpace(connPrefab, targetPrefab, connRootCell, targetPlacement.RootCell))
-                                    continue;
-
-                                var allowedFloor = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
-                                foreach (var c in AllowedWidthStrip(targetCell, s2.Side, s2.Width)) allowedFloor.Add(c);
-                                if (HasOverlap(connFloors, occupiedFloor, allowedFloor))
-                                    continue;
-
-                                var allowedConnectorWallReplace = new HashSet<Vector3Int>();
-                                foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                foreach (var wc in targetPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
-                                if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
-                                    continue;
-
-                                int depthBeforeConn = placementStack.Count;
-
-                                var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
-                                var connMeta = connInst.GetComponent<ConnectorMeta>();
-                                if (connMeta == null)
+                            foreach (var s2 in s2Candidates)
+                            {
+                                foreach (var targetSock in targetSockets.Where(ts =>
+                                             ts.Side == s2.Side.Opposite() &&
+                                             NormalizeWidth(ts.Width) == NormalizeWidth(s2.Width)))
                                 {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
+                                    var targetCell = stamp.CellFromWorld(targetSock.transform.position);
+                                    var s2BaseCell = connRootCell + s2.CellOffset;
+                                    var inward2 = InwardVector(s2.Side);
+                                    var delta2 = targetCell - s2BaseCell;
+                                    var depthX2 = delta2.x * inward2.x + delta2.y * inward2.y;
+                                    if (depthX2 < 0 || depthX2 >= Mathf.Max(1, s2.BiteDepth))
+                                        continue;
+                                    if (delta2 != inward2 * depthX2)
+                                        continue;
+
+                                    var connFloors = new HashSet<Vector3Int>(connFloorsBase);
+                                    var connWalls = new HashSet<Vector3Int>(connWallsBase);
+                                    CarveConnectorBiteRays(connFloors, connWalls, s2BaseCell, s2.Side, depthX2);
+
+                                    if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                        continue;
+                                    if (!FitsConfigSpace(connPrefab, targetPrefab, connRootCell, targetPlacement.RootCell))
+                                        continue;
+
+                                    var allowedFloor = AllowedWidthStrip(anchorCell, s1.Side, s1.Width);
+                                    foreach (var c in AllowedWidthStrip(targetCell, s2.Side, s2.Width)) allowedFloor.Add(c);
+                                    if (HasOverlap(connFloors, occupiedFloor, allowedFloor))
+                                        continue;
+
+                                    var allowedConnectorWallReplace = new HashSet<Vector3Int>();
+                                    foreach (var wc in anchorPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
+                                    foreach (var wc in targetPlacement.WallCells) allowedConnectorWallReplace.Add(wc);
+                                    if (HasOverlap(connWalls, occupiedWall, allowedConnectorWallReplace))
+                                        continue;
+
+                                    int depthBeforeConn = placementStack.Count;
+
+                                    var connInst = UnityEngine.Object.Instantiate(connPrefab, Vector3.zero, Quaternion.identity, stampWorldParent());
+                                    var connMeta = connInst.GetComponent<ConnectorMeta>();
+                                    if (connMeta == null)
+                                    {
+                                        UnityEngine.Object.Destroy(connInst);
+                                        continue;
+                                    }
+                                    connMeta.ResetUsed();
+                                    AlignToCell(connInst.transform, connRootCell);
+                                    if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
+                                    {
+                                        UnityEngine.Object.Destroy(connInst);
+                                        continue;
+                                    }
+                                    if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
+                                    {
+                                        UnityEngine.Object.Destroy(connInst);
+                                        continue;
+                                    }
+
+                                    var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
+                                    var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
+                                    if (s1Actual == null || s2Actual == null)
+                                    {
+                                        UnityEngine.Object.Destroy(connInst);
+                                        continue;
+                                    }
+
+                                    CarveConnectorBiteRays(connPlacement.FloorCells, connPlacement.WallCells, stamp.CellFromWorld(s1Actual.transform.position), s1Actual.Side, depthX1);
+                                    CarveConnectorBiteRays(connPlacement.FloorCells, connPlacement.WallCells, stamp.CellFromWorld(s2Actual.transform.position), s2Actual.Side, depthX2);
+
+                                    // Carve doors on the already-placed rooms that participate in this connection.
+                                    CarveRoomDoorCell(anchorPlacement, anchorCell, updateOccupancy: true);
+                                    CarveRoomDoorCell(targetPlacement, targetCell, updateOccupancy: true);
+
+                                    connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock, targetSock });
+                                    connPlacement.EdgeKey = key;
+
+                                    CommitPlacement(null, connPlacement);
+                                    placedEdges.Add(key);
+                                    var success = continueAfterPlacement == null || continueAfterPlacement();
+                                    if (success)
+                                        return true;
+
+                                    RollbackToDepth(depthBeforeConn);
                                 }
-                                connMeta.ResetUsed();
-                                AlignToCell(connInst.transform, connRootCell);
-                                if (!TryComputePlacement(connMeta, connPrefab, out var connPlacement))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
-                                if (!FitsConfigSpace(anchorPrefab, connPrefab, anchorPlacement.RootCell, connRootCell))
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
-
-                                var s1Actual = FindSocketAtCell(connMeta.Sockets, s1, connRootCell);
-                                var s2Actual = FindSocketAtCell(connMeta.Sockets, s2, connRootCell, s1Actual);
-                                if (s1Actual == null || s2Actual == null)
-                                {
-                                    UnityEngine.Object.Destroy(connInst);
-                                    continue;
-                                }
-
-                                CarveConnectorEntranceWalls(connPlacement, new[] { s1Actual, s2Actual });
-
-                                connPlacement.UsedSockets.AddRange(new[] { s1Actual, s2Actual, anchorSock, targetSock });
-                                connPlacement.EdgeKey = key;
-
-                                CommitPlacement(null, connPlacement);
-                                placedEdges.Add(key);
-                                var success = continueAfterPlacement == null || continueAfterPlacement();
-                                if (success)
-                                    return true;
-
-                                RollbackToDepth(depthBeforeConn);
                             }
                         }
                     }

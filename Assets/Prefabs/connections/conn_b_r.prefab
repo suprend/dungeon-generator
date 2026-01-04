@@ -410,6 +410,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Side: 2
   Width: 1
+  BiteDepth: 7
 --- !u!1 &4166020637758326076
 GameObject:
   m_ObjectHideFlags: 0
@@ -456,6 +457,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Side: 1
   Width: 1
+  BiteDepth: 7
 --- !u!1 &5468975179379841696
 GameObject:
   m_ObjectHideFlags: 0

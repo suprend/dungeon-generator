@@ -23,6 +23,7 @@ public partial class MapGraphLevelSolver
         private readonly HashSet<Vector3Int> occupiedFloor = new();
         private readonly HashSet<Vector3Int> occupiedWall = new();
         private readonly HashSet<DoorSocket> usedSockets = new();
+        private readonly HashSet<(ModuleMetaBase owner, string spanId)> usedSocketSpans = new();
         private readonly Dictionary<GameObject, GeometryCache> geometryCache = new();
         private readonly Dictionary<GameObject, ModuleBlueprint> blueprintCache = new();
         private readonly Dictionary<(ConnectionTypeAsset conn, DoorSide side, int width), List<GameObject>> connectorPrefabCache = new();
@@ -177,4 +178,3 @@ public partial class MapGraphLevelSolver
         }
     }
 }
-

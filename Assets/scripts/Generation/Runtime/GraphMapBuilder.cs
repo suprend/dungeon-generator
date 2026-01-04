@@ -31,6 +31,9 @@ public class GraphMapBuilder : MonoBehaviour
     public int innerIterations = 128;
     [Range(0.01f, 0.999f)]
     public float cooling = 0.65f;
+    [Range(0f, 1f)]
+    [Tooltip("Probability of changing a node prefab during SA perturbation (higher explores more, lower is faster/more stable).")]
+    public float changePrefabProbability = 0.35f;
     public int maxWiggleCandidates = 16;
     public int maxFallbackCandidates = 256;
     [Tooltip("How many different random seeds to try if layout generation/placement fails. Used only when randomSeed == 0.")]
@@ -79,6 +82,7 @@ public class GraphMapBuilder : MonoBehaviour
             TemperatureSteps = temperatureSteps,
             InnerIterations = innerIterations,
             Cooling = cooling,
+            ChangePrefabProbability = changePrefabProbability,
             MaxWiggleCandidates = maxWiggleCandidates,
             MaxFallbackCandidates = maxFallbackCandidates,
             VerboseConfigSpaceLogs = verboseConfigSpaceLogs,

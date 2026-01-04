@@ -17,6 +17,7 @@ public sealed partial class MapGraphLayoutGenerator
         public int TemperatureSteps { get; set; } = 12;
         public int InnerIterations { get; set; } = 64;
         public float Cooling { get; set; } = 0.65f;
+        public float ChangePrefabProbability { get; set; } = 0.35f;
         public int MaxWiggleCandidates { get; set; } = 16;
         public int MaxFallbackCandidates { get; set; } = 128;
         public bool VerboseConfigSpaceLogs { get; set; } = false;

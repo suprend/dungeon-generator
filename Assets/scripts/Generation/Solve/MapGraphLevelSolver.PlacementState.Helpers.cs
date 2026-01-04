@@ -259,84 +259,6 @@ public partial class MapGraphLevelSolver
             return false;
         }
 
-        private bool IsSocketBlocked(ModuleMetaBase owner, DoorSocket socket)
-        {
-            if (socket == null)
-                return true;
-            if (usedSockets.Contains(socket))
-                return true;
-
-            var spanId = socket.SpanId;
-            if (string.IsNullOrEmpty(spanId))
-                return false;
-
-            owner ??= socket.GetComponentInParent<ModuleMetaBase>();
-            if (owner == null)
-                return false;
-
-            return usedSocketSpans.Contains((owner, spanId));
-        }
-
-        private void MarkSocketUsed(DoorSocket socket)
-        {
-            if (socket == null)
-                return;
-
-            usedSockets.Add(socket);
-
-            var spanId = socket.SpanId;
-            if (string.IsNullOrEmpty(spanId))
-                return;
-
-            var owner = socket.GetComponentInParent<ModuleMetaBase>();
-            if (owner != null)
-                usedSocketSpans.Add((owner, spanId));
-        }
-
-        private void UnmarkSocketUsed(DoorSocket socket)
-        {
-            if (socket == null)
-                return;
-
-            usedSockets.Remove(socket);
-
-            var spanId = socket.SpanId;
-            if (string.IsNullOrEmpty(spanId))
-                return;
-
-            var owner = socket.GetComponentInParent<ModuleMetaBase>();
-            if (owner == null)
-                return;
-
-            var key = (owner, spanId);
-            if (!usedSocketSpans.Contains(key))
-                return;
-
-            // Defensive: only clear the span lock when no other socket from the same span is still marked used.
-            foreach (var s in usedSockets)
-            {
-                if (s == null)
-                    continue;
-                if (s == socket)
-                    continue;
-                if (s.SpanId != spanId)
-                    continue;
-                if (s.GetComponentInParent<ModuleMetaBase>() != owner)
-                    continue;
-                return;
-            }
-
-            usedSocketSpans.Remove(key);
-        }
-
-        private static void AddUsedSocketToPlacement(Placement placement, DoorSocket socket)
-        {
-            if (placement == null || socket == null)
-                return;
-            if (!placement.UsedSockets.Contains(socket))
-                placement.UsedSockets.Add(socket);
-        }
-
         private bool HasConfigSpace(GameObject fixedPrefab, GameObject movingPrefab)
         {
             if (configSpaceLibrary == null || fixedPrefab == null || movingPrefab == null)
@@ -361,17 +283,11 @@ public partial class MapGraphLevelSolver
             if (maxDurationSeconds <= 0f) return true;
             if (Time.realtimeSinceStartup - startTime <= maxDurationSeconds)
                 return true;
-            var msg = $"Placement time limit exceeded. Nodes placed {placedNodes.Count}/{totalNodes}, edges placed {placedEdges.Count}/{totalEdges}.";
+            var msg = $"Placement time limit exceeded. Nodes placed {placedNodes.Count}/{totalNodes}.";
             if (verboseLogs)
                 Debug.Log($"[MapGraphLevelSolver] {msg}");
             LastError ??= msg;
             return false;
-        }
-
-        private HashSet<Vector3Int> AllowedWidthStrip(Vector3Int anchorCell, DoorSide side, int width)
-        {
-            // Width is currently not supported; allow only the socket cell itself.
-            return new HashSet<Vector3Int> { anchorCell };
         }
 
         private void CommitPlacement(string nodeId, Placement placement)
@@ -379,21 +295,8 @@ public partial class MapGraphLevelSolver
             placementStack.Add(placement);
             foreach (var c in placement.FloorCells) occupiedFloor.Add(c);
             foreach (var c in placement.WallCells) occupiedWall.Add(c);
-            foreach (var s in placement.UsedSockets) MarkSocketUsed(s);
-            if (placement.EdgeKey.HasValue)
-                placedEdges.Add(placement.EdgeKey.Value);
             if (!string.IsNullOrEmpty(nodeId))
                 placedNodes[nodeId] = placement;
-        }
-
-        private void RollbackToDepth(int depth)
-        {
-            while (placementStack.Count > depth)
-            {
-                var p = placementStack[placementStack.Count - 1];
-                RemovePlacement(p);
-                placementStack.RemoveAt(placementStack.Count - 1);
-            }
         }
 
         public void StampAll(bool disableRenderers = true)
@@ -417,11 +320,8 @@ public partial class MapGraphLevelSolver
             }
             placementStack.Clear();
             placedNodes.Clear();
-            placedEdges.Clear();
             occupiedFloor.Clear();
             occupiedWall.Clear();
-            usedSockets.Clear();
-            usedSocketSpans.Clear();
         }
 
         public void Cleanup()
@@ -433,24 +333,8 @@ public partial class MapGraphLevelSolver
             }
             placementStack.Clear();
             placedNodes.Clear();
-            placedEdges.Clear();
             occupiedFloor.Clear();
             occupiedWall.Clear();
-            usedSockets.Clear();
-            usedSocketSpans.Clear();
-        }
-
-        private void RemovePlacement(Placement p)
-        {
-            foreach (var kv in placedNodes.Where(kv => kv.Value == p).ToList())
-                placedNodes.Remove(kv.Key);
-            foreach (var c in p.FloorCells) occupiedFloor.Remove(c);
-            foreach (var c in p.WallCells) occupiedWall.Remove(c);
-            foreach (var s in p.UsedSockets) UnmarkSocketUsed(s);
-            if (p.EdgeKey.HasValue)
-                placedEdges.Remove(p.EdgeKey.Value);
-            if (p.Meta != null)
-                UnityEngine.Object.Destroy(p.Meta.gameObject);
         }
 
         private void Log(string msg)
@@ -474,8 +358,6 @@ public partial class MapGraphLevelSolver
             public ModuleMetaBase Meta { get; }
             public HashSet<Vector3Int> FloorCells { get; }
             public HashSet<Vector3Int> WallCells { get; }
-            public List<DoorSocket> UsedSockets { get; }
-            public (string, string)? EdgeKey { get; set; }
             public GameObject Prefab { get; }
             public Vector3Int RootCell { get; private set; }
 
@@ -484,8 +366,6 @@ public partial class MapGraphLevelSolver
                 Meta = meta;
                 FloorCells = floors ?? new HashSet<Vector3Int>();
                 WallCells = walls ?? new HashSet<Vector3Int>();
-                UsedSockets = new List<DoorSocket>();
-                EdgeKey = null;
                 Prefab = prefab;
                 RootCell = rootCell;
             }

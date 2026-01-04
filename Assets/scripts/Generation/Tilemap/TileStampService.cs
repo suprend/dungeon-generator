@@ -15,6 +15,10 @@ public class TileStampService
         this.wallMap = wallMap;
     }
 
+    public Grid Grid => grid;
+    public Tilemap FloorMap => floorMap;
+    public Tilemap WallMap => wallMap;
+
     public Vector3 WorldFromCell(Vector3Int cell) => grid ? grid.GetCellCenterWorld(cell) : (Vector3)cell;
     public Vector3Int CellFromWorld(Vector3 world) => grid ? grid.WorldToCell(world) : Vector3Int.FloorToInt(world);
 

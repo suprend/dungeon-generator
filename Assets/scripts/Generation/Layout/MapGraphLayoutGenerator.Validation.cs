@@ -280,6 +280,7 @@ public sealed partial class MapGraphLayoutGenerator
 
     private bool TryValidateLayout(Dictionary<string, RoomPlacement> rooms, out string error)
     {
+        using var _ps = PS(S_TryValidateLayout);
         error = null;
         if (rooms == null)
         {
@@ -371,6 +372,7 @@ public sealed partial class MapGraphLayoutGenerator
         out Vector2Int lastOverlapWorld,
         bool earlyStopAtTwo)
     {
+        using var _ps = PS(S_CountOverlapShifted);
         lastOverlapWorld = default;
         if (fixedLocal == null || movingLocal == null || fixedLocal.Count == 0 || movingLocal.Count == 0)
             return 0;
@@ -408,17 +410,32 @@ public sealed partial class MapGraphLayoutGenerator
 
     private bool IsConnector(GameObject prefab)
     {
-        return prefab != null && prefab.GetComponent<ConnectorMeta>() != null;
+        if (prefab == null)
+            return false;
+        if (connectorPrefabs != null)
+            return connectorPrefabs.Contains(prefab);
+        return prefab.GetComponent<ConnectorMeta>() != null;
     }
 
     private bool AreNeighbors(string aId, string bId)
     {
-        if (graphAsset == null || string.IsNullOrEmpty(aId) || string.IsNullOrEmpty(bId))
+        if (string.IsNullOrEmpty(aId) || string.IsNullOrEmpty(bId))
             return false;
 
-        return graphAsset.GetEdgesFor(aId).Any(e =>
-            e != null &&
-            ((e.fromNodeId == aId && e.toNodeId == bId) || (e.fromNodeId == bId && e.toNodeId == aId)));
+        if (neighborLookup != null && neighborLookup.TryGetValue(aId, out var set))
+            return set.Contains(bId);
+
+        // Fallback for legacy call sites.
+        if (graphAsset == null)
+            return false;
+        foreach (var e in graphAsset.GetEdgesFor(aId))
+        {
+            if (e == null)
+                continue;
+            if ((e.fromNodeId == aId && e.toNodeId == bId) || (e.fromNodeId == bId && e.toNodeId == aId))
+                return true;
+        }
+        return false;
     }
 
     private bool IsValidLayout(Dictionary<string, RoomPlacement> rooms)

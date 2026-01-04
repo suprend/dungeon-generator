@@ -9,6 +9,7 @@ public sealed partial class ConfigurationSpaceLibrary
 {
     private readonly ShapeLibrary shapeLibrary;
     private readonly Dictionary<(GameObject fixedPrefab, GameObject movingPrefab), ConfigurationSpace> cache = new();
+    private readonly Dictionary<GameObject, bool> isConnectorCache = new();
     private bool verbose;
     private int maxVerboseLogs = 64;
 
@@ -28,34 +29,42 @@ public sealed partial class ConfigurationSpaceLibrary
             return false;
         }
 
-        // By design, only Room ↔ Connector configuration spaces are valid.
-        if (IsConnector(fixedPrefab) == IsConnector(movingPrefab))
-        {
-            space = new ConfigurationSpace(new HashSet<Vector2Int>());
-            return true;
-        }
-
+        // Fast hit-path: avoid GetComponent/other work when cached.
         if (cache.TryGetValue((fixedPrefab, movingPrefab), out space))
             return true;
+
+        // By design, only Room ↔ Connector configuration spaces are valid.
+        var fixedIsConnector = IsConnectorCached(fixedPrefab);
+        var movingIsConnector = IsConnectorCached(movingPrefab);
+        if (fixedIsConnector == movingIsConnector)
+        {
+            space = ConfigurationSpace.Empty;
+            cache[(fixedPrefab, movingPrefab)] = space;
+            return true;
+        }
 
         if (!shapeLibrary.TryGetShape(fixedPrefab, out var fixedShape, out error))
             return false;
         if (!shapeLibrary.TryGetShape(movingPrefab, out var movingShape, out error))
             return false;
 
-        var offsets = ComputeOffsets(fixedShape, movingShape, IsConnector(fixedPrefab), IsConnector(movingPrefab));
-        space = new ConfigurationSpace(offsets);
-        if (offsets.Count == 0)
-        {
+        var offsets = ComputeOffsets(fixedShape, movingShape, fixedIsConnector, movingIsConnector);
+        space = offsets.Count == 0 ? ConfigurationSpace.Empty : new ConfigurationSpace(offsets);
+        if (offsets.Count == 0 && verbose)
             Debug.LogWarning($"[ConfigSpace] Empty offsets for {fixedPrefab.name} -> {movingPrefab.name}");
-        }
         cache[(fixedPrefab, movingPrefab)] = space;
         return true;
     }
 
-    private bool IsConnector(GameObject prefab)
+    private bool IsConnectorCached(GameObject prefab)
     {
-        return prefab != null && prefab.GetComponent<ConnectorMeta>() != null;
+        if (prefab == null)
+            return false;
+        if (isConnectorCache.TryGetValue(prefab, out var cached))
+            return cached;
+        var isConn = prefab.GetComponent<ConnectorMeta>() != null;
+        isConnectorCache[prefab] = isConn;
+        return isConn;
     }
 
     private int NormalizeWidth(int width) => 1;

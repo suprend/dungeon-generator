@@ -35,6 +35,8 @@ public sealed class ModuleShape
     public IReadOnlyList<ShapeSocket> Sockets { get; }
     public Vector2Int Min { get; }
     public Vector2Int Max { get; }
+    public Vector2Int WallMin { get; }
+    public Vector2Int WallMax { get; }
 
     public ModuleShape(HashSet<Vector2Int> floorCells, HashSet<Vector2Int> wallCells, IReadOnlyList<ShapeSocket> sockets)
     {
@@ -45,6 +47,8 @@ public sealed class ModuleShape
         Sockets = sockets ?? new List<ShapeSocket>();
         Min = ComputeMin();
         Max = ComputeMax();
+        WallMin = ComputeWallMin();
+        WallMax = ComputeWallMax();
     }
 
     private Vector2Int ComputeMin()
@@ -62,6 +66,24 @@ public sealed class ModuleShape
             return Vector2Int.zero;
         var maxX = SolidCells.Max(c => c.x);
         var maxY = SolidCells.Max(c => c.y);
+        return new Vector2Int(maxX, maxY);
+    }
+
+    private Vector2Int ComputeWallMin()
+    {
+        if (WallCells.Count == 0)
+            return Min;
+        var minX = WallCells.Min(c => c.x);
+        var minY = WallCells.Min(c => c.y);
+        return new Vector2Int(minX, minY);
+    }
+
+    private Vector2Int ComputeWallMax()
+    {
+        if (WallCells.Count == 0)
+            return Max;
+        var maxX = WallCells.Max(c => c.x);
+        var maxY = WallCells.Max(c => c.y);
         return new Vector2Int(maxX, maxY);
     }
 }

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Stopwatch = System.Diagnostics.Stopwatch;
 using UnityEngine;
+using UnityEngine.Profiling;
+using UnityEngine.Tilemaps;
 
 /// <summary>
 /// Generates planar room layouts using configuration spaces, chain decomposition, and simulated annealing.
@@ -11,6 +13,44 @@ using UnityEngine;
 /// </summary>
 public sealed partial class MapGraphLayoutGenerator
 {
+    // Unity Profiler sample names (constant strings => no per-call allocations).
+    private const string S_TryGenerate = "Layout.TryGenerate";
+    private const string S_AddChain = "Layout.AddChain";
+    private const string S_AddChainSmall = "Layout.AddChainSmall";
+    private const string S_TryPerturbInPlace = "Layout.TryPerturbInPlace";
+    private const string S_FindPositionCandidates = "Layout.FindPositionCandidates";
+    private const string S_WiggleCandidates = "Layout.WiggleCandidates";
+    private const string S_UpdateEnergyCacheInPlace = "Layout.UpdateEnergyCacheInPlace";
+    private const string S_ComputeEnergy = "Layout.ComputeEnergy";
+    private const string S_BuildEnergyCache = "Layout.BuildEnergyCache";
+    private const string S_IntersectionPenalty = "Layout.IntersectionPenalty";
+    private const string S_ComputeEdgeDistancePenalty = "Layout.ComputeEdgeDistancePenalty";
+    private const string S_TryValidateLayout = "Layout.TryValidateLayout";
+    private const string S_CountOverlapShifted = "Layout.CountOverlapShifted";
+    private const string S_BuildFacesChains = "Layout.BuildFacesChains";
+    private const string S_BuildRoomPrefabLookup = "Layout.BuildRoomPrefabLookup";
+    private const string S_BuildNeighborLookup = "Layout.BuildNeighborLookup";
+    private const string S_BuildConnectorPrefabSet = "Layout.BuildConnectorPrefabSet";
+    private const string S_WarmupShapes = "Layout.WarmupShapes";
+    private const string S_WarmupConfigSpaces = "Layout.WarmupConfigSpaces";
+    private const string S_StackSearch = "Layout.StackSearch";
+    private const string S_TryValidateGlobal = "Layout.TryValidateGlobal";
+
+    private static ProfilerSample PS(string name) => new(name);
+
+    private readonly struct ProfilerSample : System.IDisposable
+    {
+        public ProfilerSample(string name)
+        {
+            Profiler.BeginSample(name);
+        }
+
+        public void Dispose()
+        {
+            Profiler.EndSample();
+        }
+    }
+
     public sealed class Settings
     {
         public int MaxLayoutsPerChain { get; set; } = 8;
@@ -87,11 +127,19 @@ public sealed partial class MapGraphLayoutGenerator
     private readonly System.Random rng;
     private readonly Settings settings;
 
+    private static readonly Dictionary<(Grid grid, Tilemap floor, Tilemap wall), ShapeLibrary> ShapeLibrariesByStamp = new();
+    private static readonly Dictionary<(Grid grid, Tilemap floor, Tilemap wall), ConfigurationSpaceLibrary> ConfigSpaceLibrariesByStamp = new();
+
     private ShapeLibrary shapeLibrary;
     private ConfigurationSpaceLibrary configSpaceLibrary;
     private MapGraphAsset graphAsset;
     private List<MapGraphChainBuilder.Chain> orderedChains;
     private Dictionary<string, List<GameObject>> roomPrefabLookup;
+    private Dictionary<string, HashSet<string>> neighborLookup;
+    private Dictionary<string, int> nodeIndexById;
+    private string[] nodeIdByIndex;
+    private int[][] neighborIndicesByIndex;
+    private HashSet<GameObject> connectorPrefabs;
     private string lastFailureDetail;
 
     private sealed class LayoutProfiling
@@ -140,6 +188,7 @@ public sealed partial class MapGraphLayoutGenerator
         int? maxLayoutsPerChain = null,
         List<MapGraphChainBuilder.Chain> precomputedChains = null)
     {
+        using var _ps = PS(S_TryGenerate);
         var tryGenerateStart = NowTicks();
         layout = null;
         error = null;
@@ -155,6 +204,11 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         this.graphAsset = graphAsset;
+        using (PS(S_BuildNeighborLookup))
+        {
+            neighborLookup = BuildNeighborLookup(graphAsset);
+        }
+        BuildNodeIndexAndAdjacency(graphAsset);
         profiling = settings.LogLayoutProfiling ? new LayoutProfiling() : null;
 
         if (precomputedChains != null)
@@ -166,49 +220,71 @@ public sealed partial class MapGraphLayoutGenerator
             var facesChainsStart = profiling != null ? NowTicks() : 0;
             var prevFaceBuilderDebug = MapGraphFaceBuilder.LogProfiling;
             MapGraphFaceBuilder.SetDebug(settings.LogLayoutProfiling);
-            if (!MapGraphFaceBuilder.TryBuildFaces(graphAsset, out var faces, out error))
+            using (PS(S_BuildFacesChains))
             {
-                MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
-                return false;
-            }
-            if (!MapGraphChainBuilder.TryBuildChains(graphAsset, faces, out var chains, out error))
-            {
-                MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
-                return false;
+                if (!MapGraphFaceBuilder.TryBuildFaces(graphAsset, out var faces, out error))
+                {
+                    MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
+                    return false;
+                }
+                if (!MapGraphChainBuilder.TryBuildChains(graphAsset, faces, out var chains, out error))
+                {
+                    MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
+                    return false;
+                }
+                orderedChains = chains;
             }
             MapGraphFaceBuilder.SetDebug(prevFaceBuilderDebug);
             if (profiling != null)
                 profiling.FacesChainsTicks += NowTicks() - facesChainsStart;
-            orderedChains = chains;
         }
 
         orderedChains ??= new List<MapGraphChainBuilder.Chain>();
 
-        shapeLibrary = new ShapeLibrary(stamp);
-        configSpaceLibrary = new ConfigurationSpaceLibrary(shapeLibrary);
+        var stampKey = (stamp.Grid, stamp.FloorMap, stamp.WallMap);
+        if (!ShapeLibrariesByStamp.TryGetValue(stampKey, out shapeLibrary))
+        {
+            shapeLibrary = new ShapeLibrary(stamp);
+            ShapeLibrariesByStamp[stampKey] = shapeLibrary;
+        }
+        if (!ConfigSpaceLibrariesByStamp.TryGetValue(stampKey, out configSpaceLibrary))
+        {
+            configSpaceLibrary = new ConfigurationSpaceLibrary(shapeLibrary);
+            ConfigSpaceLibrariesByStamp[stampKey] = configSpaceLibrary;
+        }
         configSpaceLibrary.SetDebug(settings.VerboseConfigSpaceLogs, settings.MaxConfigSpaceLogs);
 
-        roomPrefabLookup = BuildRoomPrefabLookup(graphAsset);
+        using (PS(S_BuildRoomPrefabLookup))
+        {
+            roomPrefabLookup = BuildRoomPrefabLookup(graphAsset);
+        }
         if (roomPrefabLookup.Count == 0)
         {
             error = "No room prefabs available for layout generation.";
             return false;
         }
 
-        var connectorPrefabs = new HashSet<GameObject>();
-        foreach (var edge in graphAsset.Edges)
+        connectorPrefabs = new HashSet<GameObject>();
+        using (PS(S_BuildConnectorPrefabSet))
         {
-            var conn = edge?.connectionType ?? graphAsset.DefaultConnectionType;
-            if (conn?.prefabs == null) continue;
-            foreach (var p in conn.prefabs)
-                if (p != null) connectorPrefabs.Add(p);
+            foreach (var edge in graphAsset.Edges)
+            {
+                var conn = edge?.connectionType ?? graphAsset.DefaultConnectionType;
+                if (conn?.prefabs == null)
+                    continue;
+                foreach (var p in conn.prefabs)
+                    if (p != null) connectorPrefabs.Add(p);
+            }
         }
 
         var warmupShapesStart = profiling != null ? NowTicks() : 0;
-        foreach (var prefab in roomPrefabLookup.Values.SelectMany(x => x).Distinct())
+        using (PS(S_WarmupShapes))
         {
-            if (!shapeLibrary.TryGetShape(prefab, out _, out error))
-                return false;
+            foreach (var prefab in roomPrefabLookup.Values.SelectMany(x => x).Distinct())
+            {
+                if (!shapeLibrary.TryGetShape(prefab, out _, out error))
+                    return false;
+            }
         }
         if (profiling != null)
             profiling.WarmupShapesTicks += NowTicks() - warmupShapesStart;
@@ -280,42 +356,49 @@ public sealed partial class MapGraphLayoutGenerator
             : null;
         var maxTop = Mathf.Clamp(settings.MaxConfigSpaceSizePairs, 0, 64);
         var warmupCsStart = profiling != null ? NowTicks() : 0;
-        for (int i = 0; i < prefabList.Count; i++)
+        using (PS(S_WarmupConfigSpaces))
         {
-            for (int j = 0; j < prefabList.Count; j++)
+            for (int i = 0; i < prefabList.Count; i++)
             {
-                if (connectorPrefabs.Contains(prefabList[i]) && connectorPrefabs.Contains(prefabList[j]))
-                    continue;
-                if (!configSpaceLibrary.TryGetSpace(prefabList[i], prefabList[j], out var space, out error))
-                    return false;
-
-                if (settings.LogConfigSpaceSizeSummary && space != null)
+                for (int j = 0; j < prefabList.Count; j++)
                 {
-                    var count = space.Offsets != null ? space.Offsets.Count : 0;
-                    csPairs++;
-                    csSum += count;
-                    csMin = Mathf.Min(csMin, count);
-                    csMax = Mathf.Max(csMax, count);
-                    if (count == 0) csEmpty++;
-                    else
-                    {
-                        csNonEmptyPairs++;
-                        csNonEmptySum += count;
-                    }
+                    var iIsConnector = connectorPrefabs.Contains(prefabList[i]);
+                    var jIsConnector = connectorPrefabs.Contains(prefabList[j]);
+                    // Layout graph is room<->connector only, so warm up only cross-type pairs.
+                    // Skips both connector-connector and room-room pairs to avoid O(n^2) cost on unused combinations.
+                    if (iIsConnector == jIsConnector)
+                        continue;
+                    if (!configSpaceLibrary.TryGetSpace(prefabList[i], prefabList[j], out var space, out error))
+                        return false;
 
-                    if (maxTop > 0)
+                    if (settings.LogConfigSpaceSizeSummary && space != null)
                     {
-                        var fixedName = prefabList[i] != null ? prefabList[i].name : "<null>";
-                        var movingName = prefabList[j] != null ? prefabList[j].name : "<null>";
-                        if (topPairs.Count < maxTop)
+                        var count = space.Offsets != null ? space.Offsets.Count : 0;
+                        csPairs++;
+                        csSum += count;
+                        csMin = Mathf.Min(csMin, count);
+                        csMax = Mathf.Max(csMax, count);
+                        if (count == 0) csEmpty++;
+                        else
                         {
-                            topPairs.Add((count, fixedName, movingName));
-                            topPairs.Sort((a, b) => b.count.CompareTo(a.count));
+                            csNonEmptyPairs++;
+                            csNonEmptySum += count;
                         }
-                        else if (count > topPairs[topPairs.Count - 1].count)
+
+                        if (maxTop > 0)
                         {
-                            topPairs[topPairs.Count - 1] = (count, fixedName, movingName);
-                            topPairs.Sort((a, b) => b.count.CompareTo(a.count));
+                            var fixedName = prefabList[i] != null ? prefabList[i].name : "<null>";
+                            var movingName = prefabList[j] != null ? prefabList[j].name : "<null>";
+                            if (topPairs.Count < maxTop)
+                            {
+                                topPairs.Add((count, fixedName, movingName));
+                                topPairs.Sort((a, b) => b.count.CompareTo(a.count));
+                            }
+                            else if (count > topPairs[topPairs.Count - 1].count)
+                            {
+                                topPairs[topPairs.Count - 1] = (count, fixedName, movingName);
+                                topPairs.Sort((a, b) => b.count.CompareTo(a.count));
+                            }
                         }
                     }
                 }
@@ -345,37 +428,43 @@ public sealed partial class MapGraphLayoutGenerator
             profiling.MaxStackDepth = Mathf.Max(profiling.MaxStackDepth, stack.Count);
         }
 
-        while (stack.Count > 0)
+        using (PS(S_StackSearch))
         {
-            var state = stack.Pop();
-            if (profiling != null)
-                profiling.StackPops++;
-            if (state.ChainIndex >= orderedChains.Count)
+            while (stack.Count > 0)
             {
-                if (TryValidateGlobal(state.Rooms, out var globalError))
+                var state = stack.Pop();
+                if (profiling != null)
+                    profiling.StackPops++;
+                if (state.ChainIndex >= orderedChains.Count)
                 {
-                    layout = new LayoutResult(state.Rooms);
+                    using (PS(S_TryValidateGlobal))
+                    {
+                        if (TryValidateGlobal(state.Rooms, out var globalError))
+                        {
+                            layout = new LayoutResult(state.Rooms);
+                            if (profiling != null)
+                            {
+                                profiling.TotalTryGenerateTicks = NowTicks() - tryGenerateStart;
+                                LogProfilingSummary(profiling);
+                            }
+                            return true;
+                        }
+                        lastFailureDetail = globalError;
+                    }
+                    continue;
+                }
+
+                var chain = orderedChains[state.ChainIndex];
+                var maxLayouts = Mathf.Max(1, maxLayoutsPerChain ?? settings.MaxLayoutsPerChain);
+                var expansions = AddChain(state, chain, maxLayouts);
+                foreach (var exp in expansions)
+                {
+                    stack.Push(exp.WithChainIndex(state.ChainIndex + 1));
                     if (profiling != null)
                     {
-                        profiling.TotalTryGenerateTicks = NowTicks() - tryGenerateStart;
-                        LogProfilingSummary(profiling);
+                        profiling.StackPushes++;
+                        profiling.MaxStackDepth = Mathf.Max(profiling.MaxStackDepth, stack.Count);
                     }
-                    return true;
-                }
-                lastFailureDetail = globalError;
-                continue;
-            }
-
-            var chain = orderedChains[state.ChainIndex];
-            var maxLayouts = Mathf.Max(1, maxLayoutsPerChain ?? settings.MaxLayoutsPerChain);
-            var expansions = AddChain(state, chain, maxLayouts);
-            foreach (var exp in expansions)
-            {
-                stack.Push(exp.WithChainIndex(state.ChainIndex + 1));
-                if (profiling != null)
-                {
-                    profiling.StackPushes++;
-                    profiling.MaxStackDepth = Mathf.Max(profiling.MaxStackDepth, stack.Count);
                 }
             }
         }
@@ -390,6 +479,83 @@ public sealed partial class MapGraphLayoutGenerator
             LogProfilingSummary(profiling);
         }
         return false;
+    }
+
+    private static Dictionary<string, HashSet<string>> BuildNeighborLookup(MapGraphAsset graphAsset)
+    {
+        var map = new Dictionary<string, HashSet<string>>();
+        if (graphAsset?.Edges == null)
+            return map;
+
+        foreach (var e in graphAsset.Edges)
+        {
+            if (e == null || string.IsNullOrEmpty(e.fromNodeId) || string.IsNullOrEmpty(e.toNodeId))
+                continue;
+
+            if (!map.TryGetValue(e.fromNodeId, out var from))
+                map[e.fromNodeId] = from = new HashSet<string>();
+            if (!map.TryGetValue(e.toNodeId, out var to))
+                map[e.toNodeId] = to = new HashSet<string>();
+
+            from.Add(e.toNodeId);
+            to.Add(e.fromNodeId);
+        }
+
+        return map;
+    }
+
+    private void BuildNodeIndexAndAdjacency(MapGraphAsset graphAsset)
+    {
+        var idSet = new HashSet<string>();
+        if (graphAsset?.Nodes != null)
+        {
+            foreach (var n in graphAsset.Nodes)
+            {
+                if (!string.IsNullOrEmpty(n?.id))
+                    idSet.Add(n.id);
+            }
+        }
+        if (graphAsset?.Edges != null)
+        {
+            foreach (var e in graphAsset.Edges)
+            {
+                if (!string.IsNullOrEmpty(e?.fromNodeId))
+                    idSet.Add(e.fromNodeId);
+                if (!string.IsNullOrEmpty(e?.toNodeId))
+                    idSet.Add(e.toNodeId);
+            }
+        }
+
+        var ids = idSet.ToList();
+        ids.Sort(StringComparer.Ordinal);
+        nodeIdByIndex = ids.ToArray();
+        nodeIndexById = new Dictionary<string, int>(nodeIdByIndex.Length);
+        for (var i = 0; i < nodeIdByIndex.Length; i++)
+            nodeIndexById[nodeIdByIndex[i]] = i;
+
+        neighborIndicesByIndex = new int[nodeIdByIndex.Length][];
+        if (neighborLookup == null)
+            return;
+
+        for (var i = 0; i < nodeIdByIndex.Length; i++)
+        {
+            var id = nodeIdByIndex[i];
+            if (!neighborLookup.TryGetValue(id, out var neigh) || neigh == null || neigh.Count == 0)
+            {
+                neighborIndicesByIndex[i] = Array.Empty<int>();
+                continue;
+            }
+
+            var tmp = new List<int>(neigh.Count);
+            foreach (var otherId in neigh)
+            {
+                if (string.IsNullOrEmpty(otherId))
+                    continue;
+                if (nodeIndexById.TryGetValue(otherId, out var j))
+                    tmp.Add(j);
+            }
+            neighborIndicesByIndex[i] = tmp.ToArray();
+        }
     }
 
     private void LogProfilingSummary(LayoutProfiling p)

@@ -14,25 +14,53 @@ public sealed partial class MapGraphLayoutGenerator
     {
         public float OverlapPenaltySum { get; set; }
         public float DistancePenaltySum { get; set; }
-        public Dictionary<(string a, string b), float> PairPenalty { get; }
-        public Dictionary<(string a, string b), float> EdgePenalty { get; }
+        public int NodeCount { get; }
+        public RoomPlacement[] PlacementsByIndex { get; }
+        public bool[] IsPlaced { get; }
+        public float[] PairPenalty { get; }
+        public float[] EdgePenalty { get; }
         public float TotalEnergy => OverlapWeight * OverlapPenaltySum + DistanceWeight * DistancePenaltySum;
 
         public EnergyCache(
+            int nodeCount,
+            RoomPlacement[] placementsByIndex,
+            bool[] isPlaced,
             float overlapPenaltySum,
             float distancePenaltySum,
-            Dictionary<(string a, string b), float> pairPenalty,
-            Dictionary<(string a, string b), float> edgePenalty)
+            float[] pairPenalty,
+            float[] edgePenalty)
         {
+            NodeCount = Mathf.Max(0, nodeCount);
+            PlacementsByIndex = placementsByIndex ?? new RoomPlacement[NodeCount];
+            IsPlaced = isPlaced ?? new bool[NodeCount];
             OverlapPenaltySum = overlapPenaltySum;
             DistancePenaltySum = distancePenaltySum;
-            PairPenalty = pairPenalty ?? new Dictionary<(string a, string b), float>();
-            EdgePenalty = edgePenalty ?? new Dictionary<(string a, string b), float>();
+            PairPenalty = pairPenalty ?? new float[PairArrayLength(NodeCount)];
+            EdgePenalty = edgePenalty ?? new float[PairArrayLength(NodeCount)];
         }
+    }
+
+    private static int PairArrayLength(int n) => n <= 1 ? 0 : (n * (n - 1)) / 2;
+
+    private static int PairIndex(int a, int b, int n)
+    {
+        if (a == b || n <= 1)
+            return -1;
+        if (a > b)
+        {
+            var t = a;
+            a = b;
+            b = t;
+        }
+        // Index into packed upper triangle (excluding diagonal).
+        // rowStart(a) = a*(n-1) - (a*(a+1))/2
+        var rowStart = a * (n - 1) - (a * (a + 1)) / 2;
+        return rowStart + (b - a - 1);
     }
 
     private float ComputeEnergy(Dictionary<string, RoomPlacement> rooms)
     {
+        using var _ps = PS(S_ComputeEnergy);
         float overlapArea = 0f;
         roomListScratch.Clear();
         foreach (var p in rooms.Values)
@@ -65,106 +93,89 @@ public sealed partial class MapGraphLayoutGenerator
 
     private EnergyCache BuildEnergyCache(Dictionary<string, RoomPlacement> rooms)
     {
-        if (rooms == null)
-            return new EnergyCache(0f, 0f, new Dictionary<(string a, string b), float>(), new Dictionary<(string a, string b), float>());
+        using var _ps = PS(S_BuildEnergyCache);
+        if (rooms == null || nodeIdByIndex == null || nodeIndexById == null)
+            return new EnergyCache(0, null, null, 0f, 0f, null, null);
+
+        var nodeCount = nodeIdByIndex.Length;
+        var placementsByIndex = new RoomPlacement[nodeCount];
+        var isPlaced = new bool[nodeCount];
+        foreach (var kv in rooms)
+        {
+            if (kv.Value == null)
+                continue;
+            if (!nodeIndexById.TryGetValue(kv.Key, out var idx))
+                continue;
+            placementsByIndex[idx] = kv.Value;
+            isPlaced[idx] = true;
+        }
 
         float overlapSum = 0f;
-        var pairPenalty = new Dictionary<(string a, string b), float>();
-        roomListScratch.Clear();
-        foreach (var p in rooms.Values)
-            roomListScratch.Add(p);
-        for (int i = 0; i < roomListScratch.Count; i++)
+        var pairPenalty = new float[PairArrayLength(nodeCount)];
+        var placedIndices = new List<int>(rooms.Count);
+        for (var i = 0; i < nodeCount; i++)
         {
-            for (int j = i + 1; j < roomListScratch.Count; j++)
+            if (isPlaced[i])
+                placedIndices.Add(i);
+        }
+        for (int pi = 0; pi < placedIndices.Count; pi++)
+        {
+            var i = placedIndices[pi];
+            var a = placementsByIndex[i];
+            if (a == null)
+                continue;
+            for (int pj = pi + 1; pj < placedIndices.Count; pj++)
             {
-                var a = roomListScratch[i];
-                var b = roomListScratch[j];
+                var j = placedIndices[pj];
+                var b = placementsByIndex[j];
                 if (a == null || b == null)
                     continue;
-                var key = PairKey(a.NodeId, b.NodeId);
                 var p = IntersectionPenalty(a, b);
-                pairPenalty[key] = p;
+                var idx = PairIndex(i, j, nodeCount);
+                if (idx >= 0)
+                    pairPenalty[idx] = p;
                 overlapSum += p;
             }
         }
 
         float distSum = 0f;
-        var edgePenalty = new Dictionary<(string a, string b), float>();
-        if (graphAsset != null)
+        var edgePenalty = new float[PairArrayLength(nodeCount)];
+        if (neighborIndicesByIndex != null)
         {
-            foreach (var edge in graphAsset.Edges)
+            for (int pi = 0; pi < placedIndices.Count; pi++)
             {
-                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                var i = placedIndices[pi];
+                var a = placementsByIndex[i];
+                if (a == null)
                     continue;
-                if (!rooms.TryGetValue(edge.fromNodeId, out var a) || !rooms.TryGetValue(edge.toNodeId, out var b))
+                var neigh = neighborIndicesByIndex[i];
+                if (neigh == null)
                     continue;
-                var key = PairKey(edge.fromNodeId, edge.toNodeId);
-                var p = ComputeEdgeDistancePenalty(a, b);
-                edgePenalty[key] = p;
-                distSum += p;
+                for (var k = 0; k < neigh.Length; k++)
+                {
+                    var j = neigh[k];
+                    if (j <= i)
+                        continue;
+                    if (j < 0 || j >= nodeCount || !isPlaced[j])
+                        continue;
+                    var b = placementsByIndex[j];
+                    if (b == null)
+                        continue;
+                    var p = ComputeEdgeDistancePenalty(a, b);
+                    var idx = PairIndex(i, j, nodeCount);
+                    if (idx >= 0)
+                        edgePenalty[idx] = p;
+                    distSum += p;
+                }
             }
         }
 
-        return new EnergyCache(overlapSum, distSum, pairPenalty, edgePenalty);
-    }
-
-    private EnergyCache UpdateEnergyCacheForMove(EnergyCache baseCache, Dictionary<string, RoomPlacement> roomsBefore, Dictionary<string, RoomPlacement> roomsAfter, string changedId)
-    {
-        if (baseCache == null)
-            return BuildEnergyCache(roomsAfter);
-        if (roomsAfter == null || string.IsNullOrEmpty(changedId) || !roomsAfter.TryGetValue(changedId, out var changedAfter))
-            return BuildEnergyCache(roomsAfter);
-
-        var nextPairPenalty = new Dictionary<(string a, string b), float>(baseCache.PairPenalty);
-        var nextEdgePenalty = new Dictionary<(string a, string b), float>(baseCache.EdgePenalty);
-        float overlapSum = baseCache.OverlapPenaltySum;
-        float distSum = baseCache.DistancePenaltySum;
-
-        // Update pair penalties for (changed, other).
-        foreach (var otherId in roomsAfter.Keys)
-        {
-            if (otherId == changedId)
-                continue;
-            if (!roomsAfter.TryGetValue(otherId, out var otherPlacement) || otherPlacement == null)
-                continue;
-
-            var key = PairKey(changedId, otherId);
-            if (nextPairPenalty.TryGetValue(key, out var oldP))
-                overlapSum -= oldP;
-            var newP = IntersectionPenalty(changedAfter, otherPlacement);
-            nextPairPenalty[key] = newP;
-            overlapSum += newP;
-        }
-
-        // Update distance penalties only for edges incident to changed node.
-        if (graphAsset != null)
-        {
-            var touched = new HashSet<(string a, string b)>();
-            foreach (var edge in graphAsset.GetEdgesFor(changedId))
-            {
-                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
-                    continue;
-                var aId = edge.fromNodeId;
-                var bId = edge.toNodeId;
-                var key = PairKey(aId, bId);
-                if (!touched.Add(key))
-                    continue;
-                if (!roomsAfter.TryGetValue(aId, out var a) || !roomsAfter.TryGetValue(bId, out var b))
-                    continue;
-
-                if (nextEdgePenalty.TryGetValue(key, out var oldD))
-                    distSum -= oldD;
-                var newD = ComputeEdgeDistancePenalty(a, b);
-                nextEdgePenalty[key] = newD;
-                distSum += newD;
-            }
-        }
-
-        return new EnergyCache(overlapSum, distSum, nextPairPenalty, nextEdgePenalty);
+        return new EnergyCache(nodeCount, placementsByIndex, isPlaced, overlapSum, distSum, pairPenalty, edgePenalty);
     }
 
     private float ComputeEdgeDistancePenalty(RoomPlacement a, RoomPlacement b)
     {
+        using var _ps = PS(S_ComputeEdgeDistancePenalty);
         if (a == null || b == null)
             return 0f;
         if (RoomsTouchEitherWay(a, b))
@@ -175,12 +186,7 @@ public sealed partial class MapGraphLayoutGenerator
         return diff.sqrMagnitude;
     }
 
-    private static (string a, string b) PairKey(string a, string b)
-    {
-        if (string.CompareOrdinal(a, b) <= 0)
-            return (a, b);
-        return (b, a);
-    }
+    // PairKey removed in favor of index-based PairIndex().
 
     private float IntersectionArea(RoomPlacement a, RoomPlacement b)
     {
@@ -211,6 +217,7 @@ public sealed partial class MapGraphLayoutGenerator
 
     private float IntersectionPenaltyFast(RoomPlacement a, RoomPlacement b)
     {
+        using var _ps = PS(S_IntersectionPenalty);
         if (a?.Shape == null || b?.Shape == null)
             return 0f;
 
@@ -221,6 +228,30 @@ public sealed partial class MapGraphLayoutGenerator
         if (aFloor == null || bFloor == null || aWall == null || bWall == null)
             return 0f;
 
+        static bool BoundsOverlap(Vector2Int aMin, Vector2Int aMax, Vector2Int bMin, Vector2Int bMax)
+        {
+            if (aMax.x < bMin.x || bMax.x < aMin.x)
+                return false;
+            if (aMax.y < bMin.y || bMax.y < aMin.y)
+                return false;
+            return true;
+        }
+
+        var aFloorMinW = a.Shape.Min + a.Root;
+        var aFloorMaxW = a.Shape.Max + a.Root;
+        var bFloorMinW = b.Shape.Min + b.Root;
+        var bFloorMaxW = b.Shape.Max + b.Root;
+        var aWallMinW = a.Shape.WallMin + a.Root;
+        var aWallMaxW = a.Shape.WallMax + a.Root;
+        var bWallMinW = b.Shape.WallMin + b.Root;
+        var bWallMaxW = b.Shape.WallMax + b.Root;
+
+        var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
+        var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
+        var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
+        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor)
+            return 0f;
+
         var penalty = 0f;
 
         // Delta from A-local to B-local overlap checks.
@@ -228,17 +259,26 @@ public sealed partial class MapGraphLayoutGenerator
 
         TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB);
 
-        // Floor↔floor overlaps (except allowed bite-depth cut cells).
-        var illegalFloorFloor = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloor, a.Root, out _, earlyStopAtTwo: false);
-        if (illegalFloorFloor > 0)
-            penalty += illegalFloorFloor;
+        if (checkFloorFloor)
+        {
+            // Floor↔floor overlaps (except allowed bite-depth cut cells).
+            var illegalFloorFloor = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloor, a.Root, out _, earlyStopAtTwo: false);
+            if (illegalFloorFloor > 0)
+                penalty += illegalFloorFloor;
+        }
 
-        // aWalls vs bFloors
-        penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out _, earlyStopAtTwo: false);
+        if (checkAWallBFloor)
+        {
+            // aWalls vs bFloors
+            penalty += CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out _, earlyStopAtTwo: false);
+        }
 
-        // bWalls vs aFloors: invert delta (A relative to B)
-        var deltaAB = a.Root - b.Root;
-        penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out _, earlyStopAtTwo: false);
+        if (checkBWallAFloor)
+        {
+            // bWalls vs aFloors: invert delta (A relative to B)
+            var deltaAB = a.Root - b.Root;
+            penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out _, earlyStopAtTwo: false);
+        }
 
         return penalty;
     }

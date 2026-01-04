@@ -70,7 +70,7 @@ public class TileStampService
         return result;
     }
 
-    public void StampModuleFloor(ModuleMetaBase module)
+    public void StampModuleFloor(ModuleMetaBase module, HashSet<Vector3Int> allowedCells = null)
     {
         if (!module || floorMap == null || grid == null) return;
         var tilemaps = module.GetComponentsInChildren<Tilemap>();
@@ -87,13 +87,14 @@ public class TileStampService
                 if (tile == null) continue;
                 var world = src.GetCellCenterWorld(c);
                 var dstCell = grid.WorldToCell(world);
+                if (allowedCells != null && !allowedCells.Contains(dstCell)) continue;
                 PasteTile(src, c, floorMap, dstCell);
                 if (wallMap) wallMap.SetTile(dstCell, null);
             }
         }
     }
 
-    public void StampModuleWalls(ModuleMetaBase module, HashSet<Vector3Int> overrideCells = null)
+    public void StampModuleWalls(ModuleMetaBase module, HashSet<Vector3Int> overrideCells = null, HashSet<Vector3Int> allowedCells = null)
     {
         if (!module || wallMap == null || grid == null) return;
         var tilemaps = module.GetComponentsInChildren<Tilemap>();
@@ -110,6 +111,7 @@ public class TileStampService
                 if (tile == null) continue;
                 var world = src.GetCellCenterWorld(c);
                 var dstCell = grid.WorldToCell(world);
+                if (allowedCells != null && !allowedCells.Contains(dstCell)) continue;
                 if (floorMap != null && floorMap.HasTile(dstCell)) continue;
                 bool canOverride = overrideCells != null && overrideCells.Contains(dstCell);
                 if (!canOverride && wallMap.HasTile(dstCell)) continue;

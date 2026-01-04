@@ -24,6 +24,11 @@ public sealed partial class MapGraphLayoutGenerator
         public bool LogConfigSpaceSizeSummary { get; set; } = false;
         public int MaxConfigSpaceSizePairs { get; set; } = 12;
         public bool LogLayoutProfiling { get; set; } = false;
+
+        // When no layouts are produced for a chain, emit diagnostics about the best (lowest-energy) state encountered.
+        public bool DebugNoLayouts { get; set; } = false;
+        public int DebugNoLayoutsTopPairs { get; set; } = 6;
+        public int DebugNoLayoutsTopEdges { get; set; } = 16;
     }
 
     public sealed class LayoutResult

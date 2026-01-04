@@ -219,14 +219,34 @@ public sealed partial class MapGraphLayoutGenerator
     private bool TryValidateGlobal(Dictionary<string, RoomPlacement> rooms, out string error)
     {
         error = null;
-        if (!TryValidateLayout(rooms, out error))
-            return false;
-
         if (rooms == null || rooms.Count == 0)
         {
             error = "Global invalid: empty layout (0 rooms placed).";
             return false;
         }
+
+        // Global solutions must place every node referenced by the graph.
+        var expectedNodes = graphAsset?.Nodes?.Count ?? 0;
+        if (expectedNodes > 0 && rooms.Count < expectedNodes)
+        {
+            error = $"Global invalid: missing node placements ({rooms.Count}/{expectedNodes}).";
+            return false;
+        }
+
+        // Global solutions must include placements for every edge endpoint.
+        foreach (var edge in graphAsset.Edges)
+        {
+            if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                continue;
+            if (!rooms.ContainsKey(edge.fromNodeId) || !rooms.ContainsKey(edge.toNodeId))
+            {
+                error = $"Global invalid: missing placement for edge {edge.fromNodeId}->{edge.toNodeId}.";
+                return false;
+            }
+        }
+
+        if (!TryValidateLayout(rooms, out error))
+            return false;
 
         var start = rooms.Keys.First();
         var visited = new HashSet<string>();
@@ -315,11 +335,9 @@ public sealed partial class MapGraphLayoutGenerator
         {
             if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
                 continue;
+            // Partial layouts are allowed during chain search: skip edges whose endpoints are not yet placed.
             if (!rooms.TryGetValue(edge.fromNodeId, out var a) || !rooms.TryGetValue(edge.toNodeId, out var b))
-            {
-                error = $"Layout invalid: missing placement for edge {edge.fromNodeId}->{edge.toNodeId}.";
-                return false;
-            }
+                continue;
             if (IsConnector(a.Prefab) == IsConnector(b.Prefab))
             {
                 error = $"Layout invalid: edge {edge.fromNodeId}->{edge.toNodeId} connects same-type modules (expected Room↔Corridor).";

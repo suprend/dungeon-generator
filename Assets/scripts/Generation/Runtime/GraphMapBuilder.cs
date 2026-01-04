@@ -44,6 +44,12 @@ public class GraphMapBuilder : MonoBehaviour
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
+    [Tooltip("When layout generation fails with 'AddChain produced 0 layouts', logs diagnostics about the best (lowest-energy) state reached during SA.")]
+    public bool debugNoLayouts = false;
+    [Tooltip("How many top overlapping pairs to log in DebugNoLayouts mode.")]
+    public int debugNoLayoutsTopPairs = 6;
+    [Tooltip("How many problematic edges to log in DebugNoLayouts mode.")]
+    public int debugNoLayoutsTopEdges = 16;
 
     private void Awake()
     {
@@ -79,7 +85,10 @@ public class GraphMapBuilder : MonoBehaviour
             MaxConfigSpaceLogs = maxConfigSpaceLogs,
             LogConfigSpaceSizeSummary = logConfigSpaceSizeSummary,
             MaxConfigSpaceSizePairs = maxConfigSpaceSizePairs,
-            LogLayoutProfiling = logLayoutProfiling
+            LogLayoutProfiling = logLayoutProfiling,
+            DebugNoLayouts = debugNoLayouts,
+            DebugNoLayoutsTopPairs = debugNoLayoutsTopPairs,
+            DebugNoLayoutsTopEdges = debugNoLayoutsTopEdges
         };
 
         if (!solver.TrySolveAndPlace(

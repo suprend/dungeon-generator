@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphKey.cs
+// Assets/Scripts/Generation/Graph/MapGraphKey.cs
 public static class MapGraphKey
 {
     public static (string, string) NormalizeKey(string a, string b)
@@ -6,4 +6,3 @@ public static class MapGraphKey
         return string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
     }
 }
-

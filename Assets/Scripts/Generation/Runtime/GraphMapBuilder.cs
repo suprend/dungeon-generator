@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/GraphMapBuilder.cs
+// Assets/Scripts/Generation/Runtime/GraphMapBuilder.cs
 using UnityEngine;
 using UnityEngine.Tilemaps;
 

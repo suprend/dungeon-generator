@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLevelSolver.cs
+// Assets/Scripts/Generation/Solve/MapGraphLevelSolver.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

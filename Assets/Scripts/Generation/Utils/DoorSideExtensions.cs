@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/DoorSideExtensions.cs
+// Assets/Scripts/Generation/Utils/DoorSideExtensions.cs
 using System;
 using UnityEngine;
 

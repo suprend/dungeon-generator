@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Geometry/ShapeLibrary.cs
+// Assets/Scripts/Generation/Geometry/ShapeLibrary.cs
 using System.Collections.Generic;
 using UnityEngine;
 

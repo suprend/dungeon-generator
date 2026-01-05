@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLevelSolver.Geometry.cs
+// Assets/Scripts/Generation/Solve/MapGraphLevelSolver.Geometry.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -71,4 +71,3 @@ public partial class MapGraphLevelSolver
         return true;
     }
 }
-

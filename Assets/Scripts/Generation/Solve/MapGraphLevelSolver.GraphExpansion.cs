@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLevelSolver.GraphExpansion.cs
+// Assets/Scripts/Generation/Solve/MapGraphLevelSolver.GraphExpansion.cs
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -90,4 +90,3 @@ public partial class MapGraphLevelSolver
         return expanded;
     }
 }
-

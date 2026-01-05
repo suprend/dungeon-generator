@@ -10,7 +10,7 @@ public class DoorSocket : MonoBehaviour
     [Tooltip("Пока что ширина проёма не поддерживается; всегда 1 тайл.")]
     public int Width = 1;
 
-    [Tooltip("Optional: id of a DoorSocketSpan this socket belongs to. If set, only one socket per span may be used for connections.")]
+    [Tooltip("Optional: id of a DoorSocketSpan this socket belongs to. Currently used for authoring/diagnostics; the solver does not enforce a 'one socket per span' constraint automatically.")]
     public string SpanId = "";
 
     [Min(1)]

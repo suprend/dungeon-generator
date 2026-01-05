@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLayoutGenerator.Candidates.cs
+// Assets/Scripts/Generation/Layout/MapGraphLayoutGenerator.Candidates.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;

@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/GraphTilemapGenerator.cs
+// Assets/Scripts/Generation/Runtime/GraphTilemapGenerator.cs
 using System;
 using System.Collections.Generic;
 using UnityEngine;

@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphChainBuilder.cs
+// Assets/Scripts/Generation/Graph/MapGraphChainBuilder.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

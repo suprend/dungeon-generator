@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/GraphGenRunner.cs
+// Assets/Scripts/Generation/Runtime/GraphGenRunner.cs
 using System;
 using System.Collections.Generic;
 using UnityEngine;

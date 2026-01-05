@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/ConnectionTypeAsset.cs
+// Assets/Scripts/Generation/Domain/ConnectionTypeAsset.cs
 using System.Collections.Generic;
 using UnityEngine;
 

@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/CollectionExtensions.cs
+// Assets/Scripts/Generation/Utils/CollectionExtensions.cs
 using System;
 using System.Collections.Generic;
 

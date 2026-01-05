@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLevelSolver.PlacementState.Helpers.cs
+// Assets/Scripts/Generation/Solve/MapGraphLevelSolver.PlacementState.Helpers.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

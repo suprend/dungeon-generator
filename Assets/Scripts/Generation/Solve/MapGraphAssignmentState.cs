@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphAssignmentState.cs
+// Assets/Scripts/Generation/Solve/MapGraphAssignmentState.cs
 using System.Collections.Generic;
 
 internal sealed class MapGraphAssignmentState
@@ -86,4 +86,3 @@ internal sealed class MapGraphAssignmentState
         Edge
     }
 }
-

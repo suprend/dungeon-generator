@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Geometry/ConfigurationSpace.cs
+// Assets/Scripts/Generation/Geometry/ConfigurationSpace.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;

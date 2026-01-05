@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLayoutGenerator.Prefabs.cs
+// Assets/Scripts/Generation/Layout/MapGraphLayoutGenerator.Prefabs.cs
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -36,4 +36,3 @@ public sealed partial class MapGraphLayoutGenerator
         return lookup;
     }
 }
-

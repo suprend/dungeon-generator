@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLevelSolver.AssignmentSolver.cs
+// Assets/Scripts/Generation/Solve/MapGraphLevelSolver.AssignmentSolver.cs
 using System;
 using System.Collections.Generic;
 
@@ -96,4 +96,3 @@ public partial class MapGraphLevelSolver
         return true;
     }
 }
-

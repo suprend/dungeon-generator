@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Debug/PlanarityBenchmark.cs
+// Assets/Scripts/Generation/Debug/PlanarityBenchmark.cs
 using System;
 using System.Collections.Generic;
 using System.Text;

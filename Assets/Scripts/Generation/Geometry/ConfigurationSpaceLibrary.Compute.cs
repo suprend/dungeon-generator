@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Geometry/ConfigurationSpaceLibrary.Compute.cs
+// Assets/Scripts/Generation/Geometry/ConfigurationSpaceLibrary.Compute.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -20,7 +20,9 @@ public sealed partial class ConfigurationSpaceLibrary
         {
             if (fixedIsConnector == movingIsConnector)
             {
-                // Legacy strict "1-tile bite" when the pair is not Room↔Connector.
+                // NOTE: With the current ConfigurationSpaceLibrary.TryGetSpace(...) contract this branch is not reachable:
+                // same-type pairs (Room↔Room / Connector↔Connector) return ConfigurationSpace.Empty without computing offsets.
+                // Kept for potential future use / diagnostics.
                 var delta = aSock.CellOffset - bSock.CellOffset;
                 var biteStatus = GetBiteOverlapStatus(fixedShape.FloorCells, movingShape.FloorCells, delta, aSock.CellOffset, out var biteCell, out var biteCount);
                 if (biteStatus != "OK")
@@ -32,7 +34,7 @@ public sealed partial class ConfigurationSpaceLibrary
                     continue;
                 }
 
-                var allowedDoorCellOnly = new HashSet<Vector2Int> { aSock.CellOffset };
+                var allowedDoorCellOnly = AllowedFixedCells.DoorOnly(aSock.CellOffset);
                 if (HasOverlap(fixedShape.FloorCells, movingShape.WallCells, delta, allowedDoorCellOnly, out var badFloorWall))
                 {
                     Tally(summary, "WallOnFloor");
@@ -70,6 +72,9 @@ public sealed partial class ConfigurationSpaceLibrary
 
             for (var depthX = 0; depthX < maxDepth; depthX++)
             {
+                // We “slide” the room socket along the connector inward ray.
+                // depthX=0 means the room socket aligns with the authored connector socket cell.
+                // depthX>0 means the room socket aligns deeper inside the connector by X tiles.
                 var fixedDoorCell = aSock.CellOffset;
                 var movingDoorCell = bSock.CellOffset;
                 if (connectorIsFixed)
@@ -81,6 +86,8 @@ public sealed partial class ConfigurationSpaceLibrary
                 var delta = fixedDoorCell - movingDoorCell;
 
                 // Require the aligned "door" cell to be floor for both shapes, otherwise this delta cannot represent a passage.
+                // Note: room sockets are often authored in the wall Tilemap, but they typically still have a floor tile under them.
+                // Wall-vs-floor at the door cell is allowed separately below via allowedDoorCellOnly.
                 if (connShape.FloorCells == null || roomShape.FloorCells == null ||
                     !connShape.FloorCells.Contains(connSock.CellOffset + inward * depthX) ||
                     !roomShape.FloorCells.Contains(roomSock.CellOffset))
@@ -94,15 +101,10 @@ public sealed partial class ConfigurationSpaceLibrary
                 var connBaseFixed = connectorIsFixed ? connSock.CellOffset : (connSock.CellOffset + delta);
                 var maxK = depthX;
 
-                var allowedFloorRay = new HashSet<Vector2Int>();
-                var allowedWallRays = new HashSet<Vector2Int>();
-                for (var k = 0; k <= maxK; k++)
-                {
-                    var c = connBaseFixed + inward * k;
-                    allowedFloorRay.Add(c);
-                    allowedWallRays.Add(c + tangent);
-                    allowedWallRays.Add(c - tangent);
-                }
+                // Allowed overlap “carve mask” for this (fixed,moving,delta,depthX), expressed in fixed-local coordinates:
+                // - floor ray: connBaseFixed + inward*k for k in [0..X]
+                // - wall rays: (connBaseFixed + inward*k) ± tangent for k in [0..X]
+                var allowedFloorRay = AllowedFixedCells.Rays(connBaseFixed, inward, tangent, maxK, rayMask: 1);
 
                 // Reject any floor↔floor overlaps outside the carved floor-ray prefix (0..X).
                 if (HasOverlapOutsideAllowed(fixedShape.FloorCells, movingShape.FloorCells, delta, allowedFloorRay, out var badFloorFloor))
@@ -115,13 +117,9 @@ public sealed partial class ConfigurationSpaceLibrary
                 }
 
                 // Allow wall↔floor overlaps only along the two carved wall rays (0..X).
-                var allowedDoorCellOnly = new HashSet<Vector2Int> { connectorIsFixed ? fixedDoorCell : (movingDoorCell + delta) };
-                var allowedForMovingWalls = new HashSet<Vector2Int>(allowedDoorCellOnly);
-                var allowedForFixedWalls = new HashSet<Vector2Int>(allowedDoorCellOnly);
-                if (movingIsConnector)
-                    allowedForMovingWalls.UnionWith(allowedWallRays);
-                if (fixedIsConnector)
-                    allowedForFixedWalls.UnionWith(allowedWallRays);
+                var doorCellFixed = connectorIsFixed ? fixedDoorCell : (movingDoorCell + delta);
+                var allowedForMovingWalls = AllowedFixedCells.DoorPlusOptionalRays(doorCellFixed, includeRays: movingIsConnector, connBaseFixed, inward, tangent, maxK, rayMask: 2);
+                var allowedForFixedWalls = AllowedFixedCells.DoorPlusOptionalRays(doorCellFixed, includeRays: fixedIsConnector, connBaseFixed, inward, tangent, maxK, rayMask: 2);
 
                 if (HasOverlap(fixedShape.FloorCells, movingShape.WallCells, delta, allowedForMovingWalls, out var badFloorWall))
                 {
@@ -171,24 +169,6 @@ public sealed partial class ConfigurationSpaceLibrary
     private static Vector2Int TangentVector(DoorSide side)
     {
         return side == DoorSide.North || side == DoorSide.South ? Vector2Int.right : Vector2Int.up;
-    }
-
-    private bool HasOverlapOutsideAllowed(HashSet<Vector2Int> fixedLocal, HashSet<Vector2Int> movingLocal, Vector2Int delta, HashSet<Vector2Int> allowedFixedCells, out Vector2Int badCellFixed)
-    {
-        badCellFixed = default;
-        if (fixedLocal == null || movingLocal == null || fixedLocal.Count == 0 || movingLocal.Count == 0)
-            return false;
-        foreach (var c in movingLocal)
-        {
-            var fixedCell = c + delta;
-            if (!fixedLocal.Contains(fixedCell))
-                continue;
-            if (allowedFixedCells != null && allowedFixedCells.Contains(fixedCell))
-                continue;
-            badCellFixed = fixedCell;
-            return true;
-        }
-        return false;
     }
 
     private List<(ShapeSocket, ShapeSocket)> CollectCompatibleSocketPairs(ModuleShape fixedShape, ModuleShape movingShape)

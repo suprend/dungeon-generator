@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Geometry/ConfigurationSpaceLibrary.Debug.cs
+// Assets/Scripts/Generation/Geometry/ConfigurationSpaceLibrary.Debug.cs
 using UnityEngine;
 
 public sealed partial class ConfigurationSpaceLibrary
@@ -22,4 +22,3 @@ public sealed partial class ConfigurationSpaceLibrary
         Debug.Log($"[ConfigSpace][dbg] {aSock.Side}@{aSock.CellOffset} vs {bSock.Side}@{bSock.CellOffset} delta={delta} => {detail}");
     }
 }
-

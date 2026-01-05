@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/RoomTypeAsset.cs
+// Assets/Scripts/Generation/Domain/RoomTypeAsset.cs
 using System.Collections.Generic;
 using UnityEngine;
 

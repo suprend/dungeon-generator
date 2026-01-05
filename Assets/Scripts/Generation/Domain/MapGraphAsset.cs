@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/MapGraphAsset.cs
+// Assets/Scripts/Generation/Domain/MapGraphAsset.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

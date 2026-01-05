@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphLayoutGenerator.Energy.cs
+// Assets/Scripts/Generation/Layout/MapGraphLayoutGenerator.Energy.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -9,54 +9,6 @@ public sealed partial class MapGraphLayoutGenerator
     private const float DistanceWeight = 1f;
 
     private readonly List<RoomPlacement> roomListScratch = new();
-
-    private sealed class EnergyCache
-    {
-        public float OverlapPenaltySum { get; set; }
-        public float DistancePenaltySum { get; set; }
-        public int NodeCount { get; }
-        public RoomPlacement[] PlacementsByIndex { get; }
-        public bool[] IsPlaced { get; }
-        public float[] PairPenalty { get; }
-        public float[] EdgePenalty { get; }
-        public float TotalEnergy => OverlapWeight * OverlapPenaltySum + DistanceWeight * DistancePenaltySum;
-
-        public EnergyCache(
-            int nodeCount,
-            RoomPlacement[] placementsByIndex,
-            bool[] isPlaced,
-            float overlapPenaltySum,
-            float distancePenaltySum,
-            float[] pairPenalty,
-            float[] edgePenalty)
-        {
-            NodeCount = Mathf.Max(0, nodeCount);
-            PlacementsByIndex = placementsByIndex ?? new RoomPlacement[NodeCount];
-            IsPlaced = isPlaced ?? new bool[NodeCount];
-            OverlapPenaltySum = overlapPenaltySum;
-            DistancePenaltySum = distancePenaltySum;
-            PairPenalty = pairPenalty ?? new float[PairArrayLength(NodeCount)];
-            EdgePenalty = edgePenalty ?? new float[PairArrayLength(NodeCount)];
-        }
-    }
-
-    private static int PairArrayLength(int n) => n <= 1 ? 0 : (n * (n - 1)) / 2;
-
-    private static int PairIndex(int a, int b, int n)
-    {
-        if (a == b || n <= 1)
-            return -1;
-        if (a > b)
-        {
-            var t = a;
-            a = b;
-            b = t;
-        }
-        // Index into packed upper triangle (excluding diagonal).
-        // rowStart(a) = a*(n-1) - (a*(a+1))/2
-        var rowStart = a * (n - 1) - (a * (a + 1)) / 2;
-        return rowStart + (b - a - 1);
-    }
 
     private float ComputeEnergy(Dictionary<string, RoomPlacement> rooms)
     {
@@ -89,88 +41,6 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         return OverlapWeight * overlapArea + DistanceWeight * distPenalty;
-    }
-
-    private EnergyCache BuildEnergyCache(Dictionary<string, RoomPlacement> rooms)
-    {
-        using var _ps = PS(S_BuildEnergyCache);
-        if (rooms == null || nodeIdByIndex == null || nodeIndexById == null)
-            return new EnergyCache(0, null, null, 0f, 0f, null, null);
-
-        var nodeCount = nodeIdByIndex.Length;
-        var placementsByIndex = new RoomPlacement[nodeCount];
-        var isPlaced = new bool[nodeCount];
-        foreach (var kv in rooms)
-        {
-            if (kv.Value == null)
-                continue;
-            if (!nodeIndexById.TryGetValue(kv.Key, out var idx))
-                continue;
-            placementsByIndex[idx] = kv.Value;
-            isPlaced[idx] = true;
-        }
-
-        float overlapSum = 0f;
-        var pairPenalty = new float[PairArrayLength(nodeCount)];
-        var placedIndices = new List<int>(rooms.Count);
-        for (var i = 0; i < nodeCount; i++)
-        {
-            if (isPlaced[i])
-                placedIndices.Add(i);
-        }
-        for (int pi = 0; pi < placedIndices.Count; pi++)
-        {
-            var i = placedIndices[pi];
-            var a = placementsByIndex[i];
-            if (a == null)
-                continue;
-            for (int pj = pi + 1; pj < placedIndices.Count; pj++)
-            {
-                var j = placedIndices[pj];
-                var b = placementsByIndex[j];
-                if (a == null || b == null)
-                    continue;
-                var p = IntersectionPenalty(a, b);
-                var idx = PairIndex(i, j, nodeCount);
-                if (idx >= 0)
-                    pairPenalty[idx] = p;
-                overlapSum += p;
-            }
-        }
-
-        float distSum = 0f;
-        var edgePenalty = new float[PairArrayLength(nodeCount)];
-        if (neighborIndicesByIndex != null)
-        {
-            for (int pi = 0; pi < placedIndices.Count; pi++)
-            {
-                var i = placedIndices[pi];
-                var a = placementsByIndex[i];
-                if (a == null)
-                    continue;
-                var neigh = neighborIndicesByIndex[i];
-                if (neigh == null)
-                    continue;
-                for (var k = 0; k < neigh.Length; k++)
-                {
-                    var j = neigh[k];
-                    if (j <= i)
-                        continue;
-                    if (j < 0 || j >= nodeCount || !isPlaced[j])
-                        continue;
-                    var b = placementsByIndex[j];
-                    if (b == null)
-                        continue;
-                    var p = ComputeEdgeDistancePenalty(a, b);
-                    var idx = PairIndex(i, j, nodeCount);
-                    if (idx >= 0)
-                        edgePenalty[idx] = p;
-                    distSum += p;
-                }
-            }
-        }
-
-        return new EnergyCache(nodeCount, placementsByIndex, isPlaced, overlapSum, distSum, pairPenalty, edgePenalty);
     }
 
     private float ComputeEdgeDistancePenalty(RoomPlacement a, RoomPlacement b)

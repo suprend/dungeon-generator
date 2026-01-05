@@ -1,4 +1,4 @@
-// Assets/scripts/Generation/Graph/MapGraphFaceBuilder.cs
+// Assets/Scripts/Generation/Graph/MapGraphFaceBuilder.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

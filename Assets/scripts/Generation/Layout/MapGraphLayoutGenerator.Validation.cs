@@ -378,20 +378,42 @@ public sealed partial class MapGraphLayoutGenerator
             return 0;
 
         var count = 0;
-        foreach (var c in movingLocal)
+        if (movingLocal.Count <= fixedLocal.Count)
         {
-            var fixedCell = c + deltaMovingMinusFixed;
-            if (!fixedLocal.Contains(fixedCell))
-                continue;
+            foreach (var c in movingLocal)
+            {
+                var fixedCell = c + deltaMovingMinusFixed;
+                if (!fixedLocal.Contains(fixedCell))
+                    continue;
 
-            var world = fixedRoot + fixedCell;
-            if (allowedWorld.Contains(world))
-                continue;
+                var world = fixedRoot + fixedCell;
+                if (allowedWorld.Contains(world))
+                    continue;
 
-            count++;
-            lastOverlapWorld = world;
-            if (earlyStopAtTwo && count > 1)
-                return count;
+                count++;
+                lastOverlapWorld = world;
+                if (earlyStopAtTwo && count > 1)
+                    return count;
+            }
+        }
+        else
+        {
+            // Iterate the smaller set to reduce HashSet.Contains calls.
+            foreach (var fixedCell in fixedLocal)
+            {
+                var movingCell = fixedCell - deltaMovingMinusFixed;
+                if (!movingLocal.Contains(movingCell))
+                    continue;
+
+                var world = fixedRoot + fixedCell;
+                if (allowedWorld.Contains(world))
+                    continue;
+
+                count++;
+                lastOverlapWorld = world;
+                if (earlyStopAtTwo && count > 1)
+                    return count;
+            }
         }
         return count;
     }

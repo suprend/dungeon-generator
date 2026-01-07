@@ -155,29 +155,78 @@ public sealed partial class MapGraphLayoutGenerator
         var deltaBA = b.Root - a.Root;
         TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB);
 
-        var count = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloor, a.Root, out var cell, earlyStopAtTwo: true);
-        if (count > 0)
+        if (settings != null && settings.UseBitsetOverlap)
         {
-            worldCell = cell;
-            kind = "floor-floor";
-            return true;
-        }
+            var bitsA = GetBitsets(a.Shape);
+            var bitsB = GetBitsets(b.Shape);
+            if (bitsA == null || bitsB == null)
+                return false;
 
-        count = CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out cell, earlyStopAtTwo: true);
-        if (count > 0)
-        {
-            worldCell = cell;
-            kind = $"wall({a.NodeId})-floor({b.NodeId})";
-            return true;
-        }
+            if (bitsA.Floor != null && bitsB.Floor != null)
+            {
+                var shift = (bitsB.Floor.Min + deltaBA) - bitsA.Floor.Min;
+                var count = bitsA.Floor.CountIllegalOverlapsShifted(bitsB.Floor, shift, a.Root, allowedFloor, earlyStopAtTwo: true, out var cell);
+                if (count > 0)
+                {
+                    worldCell = cell;
+                    kind = "floor-floor";
+                    return true;
+                }
+            }
 
-        var deltaAB = a.Root - b.Root;
-        count = CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out cell, earlyStopAtTwo: true);
-        if (count > 0)
+            if (bitsA.Wall != null && bitsB.Floor != null)
+            {
+                var shift = (bitsB.Floor.Min + deltaBA) - bitsA.Wall.Min;
+                var count = bitsA.Wall.CountIllegalOverlapsShifted(bitsB.Floor, shift, a.Root, allowedWallA, earlyStopAtTwo: true, out var cell);
+                if (count > 0)
+                {
+                    worldCell = cell;
+                    kind = $"wall({a.NodeId})-floor({b.NodeId})";
+                    return true;
+                }
+            }
+
+            var deltaAB = a.Root - b.Root;
+            if (bitsB.Wall != null && bitsA.Floor != null)
+            {
+                var shift = (bitsA.Floor.Min + deltaAB) - bitsB.Wall.Min;
+                var count = bitsB.Wall.CountIllegalOverlapsShifted(bitsA.Floor, shift, b.Root, allowedWallB, earlyStopAtTwo: true, out var cell);
+                if (count > 0)
+                {
+                    worldCell = cell;
+                    kind = $"wall({b.NodeId})-floor({a.NodeId})";
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else
         {
-            worldCell = cell;
-            kind = $"wall({b.NodeId})-floor({a.NodeId})";
-            return true;
+            var count = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloor, a.Root, out var cell, earlyStopAtTwo: true);
+            if (count > 0)
+            {
+                worldCell = cell;
+                kind = "floor-floor";
+                return true;
+            }
+
+            count = CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out cell, earlyStopAtTwo: true);
+            if (count > 0)
+            {
+                worldCell = cell;
+                kind = $"wall({a.NodeId})-floor({b.NodeId})";
+                return true;
+            }
+
+            var deltaAB = a.Root - b.Root;
+            count = CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out cell, earlyStopAtTwo: true);
+            if (count > 0)
+            {
+                worldCell = cell;
+                kind = $"wall({b.NodeId})-floor({a.NodeId})";
+                return true;
+            }
         }
 
         return false;

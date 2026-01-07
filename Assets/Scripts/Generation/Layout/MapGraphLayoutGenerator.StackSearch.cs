@@ -29,42 +29,57 @@ public sealed partial class MapGraphLayoutGenerator
             profiling.MaxStackDepth = UnityEngine.Mathf.Max(profiling.MaxStackDepth, stack.Count);
         }
 
+        var deepProfile = settings != null && settings.LogLayoutProfiling;
         using (PS(S_StackSearch))
         {
             while (stack.Count > 0)
             {
-                var state = stack.Pop();
+                LayoutState state;
+                using (PSIf(deepProfile, S_StackSearch_Pop))
+                {
+                    state = stack.Pop();
+                }
                 if (profiling != null)
                     profiling.StackPops++;
                 if (state.ChainIndex >= orderedChains.Count)
                 {
-                    using (PS(S_TryValidateGlobal))
+                    using (PSIf(deepProfile, S_StackSearch_ValidateGlobal))
                     {
-                        if (TryValidateGlobal(state.Rooms, out var globalError))
+                        using (PS(S_TryValidateGlobal))
                         {
-                            layout = new LayoutResult(state.Rooms);
-                            if (profiling != null)
+                            if (TryValidateGlobal(state.Rooms, out var globalError))
                             {
-                                profiling.TotalTryGenerateTicks = NowTicks() - tryGenerateStartTicks;
-                                LogProfilingSummary(profiling);
+                                layout = new LayoutResult(state.Rooms);
+                                if (profiling != null)
+                                {
+                                    profiling.TotalTryGenerateTicks = NowTicks() - tryGenerateStartTicks;
+                                    LogProfilingSummary(profiling);
+                                }
+                                return true;
                             }
-                            return true;
+                            lastFailureDetail = globalError;
                         }
-                        lastFailureDetail = globalError;
                     }
                     continue;
                 }
 
                 var chain = orderedChains[state.ChainIndex];
                 var maxLayouts = UnityEngine.Mathf.Max(1, maxLayoutsPerChain ?? settings.MaxLayoutsPerChain);
-                var expansions = AddChain(state, chain, maxLayouts);
-                foreach (var exp in expansions)
+                List<LayoutState> expansions;
+                using (PSIf(deepProfile, S_StackSearch_ExpandChain))
                 {
-                    stack.Push(exp.WithChainIndex(state.ChainIndex + 1));
-                    if (profiling != null)
+                    expansions = AddChain(state, chain, maxLayouts);
+                }
+                using (PSIf(deepProfile, S_StackSearch_Push))
+                {
+                    foreach (var exp in expansions)
                     {
-                        profiling.StackPushes++;
-                        profiling.MaxStackDepth = UnityEngine.Mathf.Max(profiling.MaxStackDepth, stack.Count);
+                        stack.Push(exp.WithChainIndex(state.ChainIndex + 1));
+                        if (profiling != null)
+                        {
+                            profiling.StackPushes++;
+                            profiling.MaxStackDepth = UnityEngine.Mathf.Max(profiling.MaxStackDepth, stack.Count);
+                        }
                     }
                 }
             }

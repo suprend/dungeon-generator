@@ -12,6 +12,22 @@ using UnityEngine.Tilemaps;
 /// </summary>
 public sealed partial class MapGraphLayoutGenerator
 {
+    private static Dictionary<string, RoomPlacement> CloneRoomsDeep(Dictionary<string, RoomPlacement> rooms)
+    {
+        if (rooms == null || rooms.Count == 0)
+            return new Dictionary<string, RoomPlacement>();
+
+        var clone = new Dictionary<string, RoomPlacement>(rooms.Count);
+        foreach (var kv in rooms)
+        {
+            var p = kv.Value;
+            if (p == null)
+                continue;
+            clone[kv.Key] = new RoomPlacement(p.NodeId, p.Prefab, p.Shape, p.Root);
+        }
+        return clone;
+    }
+
     public sealed class Settings
     {
         public int MaxLayoutsPerChain { get; set; } = 8;
@@ -26,6 +42,9 @@ public sealed partial class MapGraphLayoutGenerator
         public bool LogConfigSpaceSizeSummary { get; set; } = false;
         public int MaxConfigSpaceSizePairs { get; set; } = 12;
         public bool LogLayoutProfiling { get; set; } = false;
+
+        // Optional: use bitset-based overlap counting in IntersectionPenaltyFast (keeps HashSet fallback).
+        public bool UseBitsetOverlap { get; set; } = false;
 
         // When no layouts are produced for a chain, emit diagnostics about the best (lowest-energy) state encountered.
         public bool DebugNoLayouts { get; set; } = false;
@@ -46,9 +65,9 @@ public sealed partial class MapGraphLayoutGenerator
     public sealed class RoomPlacement
     {
         public string NodeId { get; }
-        public GameObject Prefab { get; }
-        public ModuleShape Shape { get; }
-        public Vector2Int Root { get; }
+        public GameObject Prefab { get; set; }
+        public ModuleShape Shape { get; set; }
+        public Vector2Int Root { get; set; }
 
         public RoomPlacement(string nodeId, GameObject prefab, ModuleShape shape, Vector2Int root)
         {
@@ -96,6 +115,8 @@ public sealed partial class MapGraphLayoutGenerator
     private MapGraphAsset graphAsset;
     private List<MapGraphChainBuilder.Chain> orderedChains;
     private Dictionary<string, List<GameObject>> roomPrefabLookup;
+    private Dictionary<string, MapGraphAsset.NodeData> nodeById;
+    private Dictionary<RoomTypeAsset, List<GameObject>> prefabsByRoomType;
     private Dictionary<string, HashSet<string>> neighborLookup;
     private Dictionary<string, int> nodeIndexById;
     private string[] nodeIdByIndex;
@@ -112,6 +133,10 @@ public sealed partial class MapGraphLayoutGenerator
         public int StackPops;
         public int StackPushes;
         public int MaxStackDepth;
+
+        public int InitLayoutNodesScored;
+        public int InitLayoutCandidatesGenerated;
+        public int InitLayoutCandidatesScored;
 
         public int FindPositionCandidatesCalls;
         public long FindPositionCandidatesTicks;
@@ -163,6 +188,8 @@ public sealed partial class MapGraphLayoutGenerator
         shapeLibrary = ctx.ShapeLibrary;
         configSpaceLibrary = ctx.ConfigSpaceLibrary;
         roomPrefabLookup = ctx.RoomPrefabLookup;
+        nodeById = ctx.NodeById;
+        prefabsByRoomType = ctx.PrefabsByRoomType;
         connectorPrefabs = ctx.ConnectorPrefabs;
         neighborLookup = ctx.NeighborLookup;
         nodeIndexById = ctx.NodeIndexById;
@@ -271,7 +298,8 @@ public sealed partial class MapGraphLayoutGenerator
             $"facesChainsMs={facesChainsMs:0.0} warmupShapesMs={warmupShapesMs:0.0} warmupCsMs={warmupCsMs:0.0} " +
             $"getInitialMs={initMs:0.0} saLoopMs={saMs:0.0} isValidMs={validMs:0.0} (calls={p.IsValidLayoutCalls}) " +
             $"findPosMs={findMs:0.0} (calls={p.FindPositionCandidatesCalls}) " +
-            $"wiggleMs={wiggleMs:0.0} (calls={p.WiggleCandidatesCalls})");
+            $"wiggleMs={wiggleMs:0.0} (calls={p.WiggleCandidatesCalls}) " +
+            $"initNodes={p.InitLayoutNodesScored} initCandidatesGen={p.InitLayoutCandidatesGenerated} initCandidatesScored={p.InitLayoutCandidatesScored}");
     }
 
     private sealed class LayoutState

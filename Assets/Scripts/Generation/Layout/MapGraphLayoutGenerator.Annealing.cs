@@ -34,15 +34,29 @@ public sealed partial class MapGraphLayoutGenerator
     {
         public string NodeId { get; }
         public int NodeIndex { get; }
-        public RoomPlacement OldPlacement { get; }
+        public RoomPlacement Placement { get; }
+        public GameObject OldPrefab { get; }
+        public ModuleShape OldShape { get; }
+        public Vector2Int OldRoot { get; }
         public float OldOverlapSum { get; }
         public float OldDistanceSum { get; }
 
-        public MoveUndo(string nodeId, int nodeIndex, RoomPlacement oldPlacement, float oldOverlapSum, float oldDistanceSum)
+        public MoveUndo(
+            string nodeId,
+            int nodeIndex,
+            RoomPlacement placement,
+            GameObject oldPrefab,
+            ModuleShape oldShape,
+            Vector2Int oldRoot,
+            float oldOverlapSum,
+            float oldDistanceSum)
         {
             NodeId = nodeId;
             NodeIndex = nodeIndex;
-            OldPlacement = oldPlacement;
+            Placement = placement;
+            OldPrefab = oldPrefab;
+            OldShape = oldShape;
+            OldRoot = oldRoot;
             OldOverlapSum = oldOverlapSum;
             OldDistanceSum = oldDistanceSum;
         }
@@ -74,47 +88,53 @@ public sealed partial class MapGraphLayoutGenerator
         if (movableNodeIndices == null || movableNodeIndices.Count == 0)
             return false;
 
-        var targetIndex = movableNodeIndices[rng.Next(movableNodeIndices.Count)];
-        if (targetIndex < 0 || targetIndex >= energyCache.NodeCount)
-            return false;
-        var targetPlacement = energyCache.PlacementsByIndex[targetIndex];
-        if (targetPlacement == null)
-            return false;
-        var targetId = nodeIdByIndex != null && targetIndex < nodeIdByIndex.Length ? nodeIdByIndex[targetIndex] : null;
-        if (string.IsNullOrEmpty(targetId))
-            return false;
+        int targetIndex;
+        RoomPlacement targetPlacement;
+        string targetId;
+        using (PS(S_Perturb_SelectTarget))
+        {
+            targetIndex = movableNodeIndices[rng.Next(movableNodeIndices.Count)];
+            if (targetIndex < 0 || targetIndex >= energyCache.NodeCount)
+                return false;
+            targetPlacement = energyCache.PlacementsByIndex[targetIndex];
+            if (targetPlacement == null)
+                return false;
+            targetId = nodeIdByIndex != null && targetIndex < nodeIdByIndex.Length ? nodeIdByIndex[targetIndex] : null;
+            if (string.IsNullOrEmpty(targetId))
+                return false;
+        }
 
         var pChange = Mathf.Clamp01(settings.ChangePrefabProbability);
         var changeShape = rng.NextDouble() < pChange;
 
-        var prefabs = GetRoomPrefabs(graphAsset.GetNodeById(targetId));
-        if (prefabs.Count == 0)
-            return false;
-
-        GameObject newPrefab = targetPlacement.Prefab;
-        ModuleShape newShape = targetPlacement.Shape;
-        if (changeShape && prefabs.Count > 1)
+        List<GameObject> prefabs;
+        GameObject newPrefab;
+        ModuleShape newShape;
+        using (PS(S_Perturb_SelectPrefab))
         {
-            newPrefab = prefabs[rng.Next(prefabs.Count)];
-            if (!shapeLibrary.TryGetShape(newPrefab, out newShape, out _))
+            MapGraphAsset.NodeData node = null;
+            if (nodeById != null)
+                nodeById.TryGetValue(targetId, out node);
+            var type = node != null && node.roomType != null ? node.roomType : graphAsset?.DefaultRoomType;
+            if (type == null || prefabsByRoomType == null || !prefabsByRoomType.TryGetValue(type, out prefabs))
                 return false;
+            if (prefabs.Count == 0)
+                return false;
+
+            newPrefab = targetPlacement.Prefab;
+            newShape = targetPlacement.Shape;
+            if (changeShape && prefabs.Count > 1)
+            {
+                newPrefab = prefabs[rng.Next(prefabs.Count)];
+                if (!shapeLibrary.TryGetShape(newPrefab, out newShape, out _))
+                    return false;
+            }
         }
 
-        if (rng.NextDouble() < 0.5)
+        using (PS(S_Perturb_GenerateCandidates))
         {
-            FindPositionCandidates(
-                targetIndex,
-                newPrefab,
-                newShape,
-                energyCache,
-                positionCandidates,
-                allowExistingRoot: !changeShape,
-                existingRoot: targetPlacement.Root);
-        }
-        else
-        {
-            WiggleCandidates(targetIndex, newPrefab, energyCache, wiggleCandidates);
-            if (wiggleCandidates.Count == 0)
+            if (rng.NextDouble() < 0.5)
+            {
                 FindPositionCandidates(
                     targetIndex,
                     newPrefab,
@@ -123,20 +143,45 @@ public sealed partial class MapGraphLayoutGenerator
                     positionCandidates,
                     allowExistingRoot: !changeShape,
                     existingRoot: targetPlacement.Root);
+            }
+            else
+            {
+                WiggleCandidates(targetIndex, newPrefab, energyCache, wiggleCandidates);
+                if (wiggleCandidates.Count == 0)
+                    FindPositionCandidates(
+                        targetIndex,
+                        newPrefab,
+                        newShape,
+                        energyCache,
+                        positionCandidates,
+                        allowExistingRoot: !changeShape,
+                        existingRoot: targetPlacement.Root);
+            }
         }
 
         var candidates = wiggleCandidates.Count > 0 ? wiggleCandidates : positionCandidates;
         if (candidates.Count == 0)
             return false;
 
-        var newRoot = candidates[rng.Next(candidates.Count)];
-        var oldPlacement = targetPlacement;
-        undo = new MoveUndo(targetId, targetIndex, oldPlacement, energyCache.OverlapPenaltySum, energyCache.DistancePenaltySum);
+        using (PS(S_Perturb_ApplyMove))
+        {
+            var newRoot = candidates[rng.Next(candidates.Count)];
+            undo = new MoveUndo(
+                targetId,
+                targetIndex,
+                targetPlacement,
+                targetPlacement.Prefab,
+                targetPlacement.Shape,
+                targetPlacement.Root,
+                energyCache.OverlapPenaltySum,
+                energyCache.DistancePenaltySum);
 
-        var newPlacement = new RoomPlacement(targetId, newPrefab, newShape, newRoot);
-        rooms[targetId] = newPlacement;
-        energyCache.PlacementsByIndex[targetIndex] = newPlacement;
-        UpdateEnergyCacheInPlace(energyCache, targetIndex, pairChanges, edgeChanges);
+            // Mutate in place to avoid per-step allocations in SA.
+            targetPlacement.Prefab = newPrefab;
+            targetPlacement.Shape = newShape;
+            targetPlacement.Root = newRoot;
+            UpdateEnergyCacheInPlace(energyCache, targetIndex, pairChanges, edgeChanges);
+        }
 
         return true;
     }
@@ -425,9 +470,31 @@ public sealed partial class MapGraphLayoutGenerator
         var overlapSum = energyCache.OverlapPenaltySum;
         var distSum = energyCache.DistancePenaltySum;
 
-        for (var otherIndex = 0; otherIndex < energyCache.NodeCount; otherIndex++)
+        static bool BoundsOverlap(Vector2Int aMin, Vector2Int aMax, Vector2Int bMin, Vector2Int bMax)
         {
-            if (otherIndex == changedIndex || !energyCache.IsPlaced[otherIndex])
+            if (aMax.x < bMin.x || bMax.x < aMin.x)
+                return false;
+            if (aMax.y < bMin.y || bMax.y < aMin.y)
+                return false;
+            return true;
+        }
+
+        ComputeWorldBounds(
+            changedAfter,
+            out energyCache.FloorMinW[changedIndex],
+            out energyCache.FloorMaxW[changedIndex],
+            out energyCache.WallMinW[changedIndex],
+            out energyCache.WallMaxW[changedIndex]);
+
+        var aFloorMinW = energyCache.FloorMinW[changedIndex];
+        var aFloorMaxW = energyCache.FloorMaxW[changedIndex];
+        var aWallMinW = energyCache.WallMinW[changedIndex];
+        var aWallMaxW = energyCache.WallMaxW[changedIndex];
+
+        for (var pi = 0; pi < energyCache.PlacedCount; pi++)
+        {
+            var otherIndex = energyCache.PlacedIndices[pi];
+            if (otherIndex == changedIndex || otherIndex < 0 || otherIndex >= energyCache.NodeCount || !energyCache.IsPlaced[otherIndex])
                 continue;
             var otherPlacement = energyCache.PlacementsByIndex[otherIndex];
             if (otherPlacement == null)
@@ -437,11 +504,23 @@ public sealed partial class MapGraphLayoutGenerator
             if (pIdx < 0)
                 continue;
             var oldP = energyCache.PairPenalty[pIdx];
-            overlapSum -= oldP;
+            var bFloorMinW = energyCache.FloorMinW[otherIndex];
+            var bFloorMaxW = energyCache.FloorMaxW[otherIndex];
+            var bWallMinW = energyCache.WallMinW[otherIndex];
+            var bWallMaxW = energyCache.WallMaxW[otherIndex];
+
+            var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
+            var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
+            var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
+            var maybeAnyOverlap = checkFloorFloor || checkAWallBFloor || checkBWallAFloor;
+
+            var newP = (!maybeAnyOverlap && oldP == 0f) ? 0f : (maybeAnyOverlap ? IntersectionPenalty(changedAfter, otherPlacement) : 0f);
+            if (newP == oldP)
+                continue;
+
             pairChanges.Add(new PairPenaltyChange(pIdx, oldP));
-            var newP = IntersectionPenalty(changedAfter, otherPlacement);
             energyCache.PairPenalty[pIdx] = newP;
-            overlapSum += newP;
+            overlapSum += newP - oldP;
         }
 
         if (neighborIndicesByIndex != null && changedIndex < neighborIndicesByIndex.Length)
@@ -459,11 +538,13 @@ public sealed partial class MapGraphLayoutGenerator
                 if (eIdx < 0)
                     continue;
                 var oldD = energyCache.EdgePenalty[eIdx];
-                distSum -= oldD;
-                edgeChanges.Add(new EdgePenaltyChange(eIdx, oldD));
                 var newD = ComputeEdgeDistancePenalty(changedAfter, otherPlacement);
+                if (newD == oldD)
+                    continue;
+
+                edgeChanges.Add(new EdgePenaltyChange(eIdx, oldD));
                 energyCache.EdgePenalty[eIdx] = newD;
-                distSum += newD;
+                distSum += newD - oldD;
             }
         }
 
@@ -478,12 +559,23 @@ public sealed partial class MapGraphLayoutGenerator
         List<PairPenaltyChange> pairChanges,
         List<EdgePenaltyChange> edgeChanges)
     {
-        if (rooms == null || energyCache == null || string.IsNullOrEmpty(undo.NodeId))
+        if (rooms == null || energyCache == null || string.IsNullOrEmpty(undo.NodeId) || undo.Placement == null)
             return;
 
-        rooms[undo.NodeId] = undo.OldPlacement;
+        // Revert placement fields in place; dictionaries/arrays already reference the same object.
+        undo.Placement.Prefab = undo.OldPrefab;
+        undo.Placement.Shape = undo.OldShape;
+        undo.Placement.Root = undo.OldRoot;
+
         if (undo.NodeIndex >= 0 && undo.NodeIndex < energyCache.NodeCount)
-            energyCache.PlacementsByIndex[undo.NodeIndex] = undo.OldPlacement;
+        {
+            ComputeWorldBounds(
+                undo.Placement,
+                out energyCache.FloorMinW[undo.NodeIndex],
+                out energyCache.FloorMaxW[undo.NodeIndex],
+                out energyCache.WallMinW[undo.NodeIndex],
+                out energyCache.WallMaxW[undo.NodeIndex]);
+        }
         energyCache.OverlapPenaltySum = undo.OldOverlapSum;
         energyCache.DistancePenaltySum = undo.OldDistanceSum;
 

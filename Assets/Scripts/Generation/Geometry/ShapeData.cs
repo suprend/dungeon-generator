@@ -37,6 +37,8 @@ public sealed class ModuleShape
     public Vector2Int Max { get; }
     public Vector2Int WallMin { get; }
     public Vector2Int WallMax { get; }
+    public int FloorCount { get; }
+    public Vector2 CenterLocal { get; }
 
     public ModuleShape(HashSet<Vector2Int> floorCells, HashSet<Vector2Int> wallCells, IReadOnlyList<ShapeSocket> sockets)
     {
@@ -49,6 +51,23 @@ public sealed class ModuleShape
         Max = ComputeMax();
         WallMin = ComputeWallMin();
         WallMax = ComputeWallMax();
+
+        FloorCount = FloorCells.Count;
+        if (FloorCount <= 0)
+        {
+            CenterLocal = Vector2.zero;
+        }
+        else
+        {
+            long sx = 0;
+            long sy = 0;
+            foreach (var c in FloorCells)
+            {
+                sx += c.x;
+                sy += c.y;
+            }
+            CenterLocal = new Vector2(sx / (float)FloorCount, sy / (float)FloorCount);
+        }
     }
 
     private Vector2Int ComputeMin()

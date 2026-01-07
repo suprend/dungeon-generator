@@ -9,24 +9,42 @@ public sealed partial class MapGraphLayoutGenerator
         public float OverlapPenaltySum { get; set; }
         public float DistancePenaltySum { get; set; }
         public int NodeCount { get; }
+        public int PlacedCount { get; set; }
+        public int[] PlacedIndices { get; }
         public RoomPlacement[] PlacementsByIndex { get; }
         public bool[] IsPlaced { get; }
+        public Vector2Int[] FloorMinW { get; }
+        public Vector2Int[] FloorMaxW { get; }
+        public Vector2Int[] WallMinW { get; }
+        public Vector2Int[] WallMaxW { get; }
         public float[] PairPenalty { get; }
         public float[] EdgePenalty { get; }
         public float TotalEnergy => OverlapWeight * OverlapPenaltySum + DistanceWeight * DistancePenaltySum;
 
         public EnergyCache(
             int nodeCount,
+            int[] placedIndices,
+            int placedCount,
             RoomPlacement[] placementsByIndex,
             bool[] isPlaced,
+            Vector2Int[] floorMinW,
+            Vector2Int[] floorMaxW,
+            Vector2Int[] wallMinW,
+            Vector2Int[] wallMaxW,
             float overlapPenaltySum,
             float distancePenaltySum,
             float[] pairPenalty,
             float[] edgePenalty)
         {
             NodeCount = Mathf.Max(0, nodeCount);
+            PlacedIndices = placedIndices ?? new int[NodeCount];
+            PlacedCount = Mathf.Clamp(placedCount, 0, PlacedIndices.Length);
             PlacementsByIndex = placementsByIndex ?? new RoomPlacement[NodeCount];
             IsPlaced = isPlaced ?? new bool[NodeCount];
+            FloorMinW = floorMinW ?? new Vector2Int[NodeCount];
+            FloorMaxW = floorMaxW ?? new Vector2Int[NodeCount];
+            WallMinW = wallMinW ?? new Vector2Int[NodeCount];
+            WallMaxW = wallMaxW ?? new Vector2Int[NodeCount];
             OverlapPenaltySum = overlapPenaltySum;
             DistancePenaltySum = distancePenaltySum;
             PairPenalty = pairPenalty ?? new float[PairArrayLength(NodeCount)];
@@ -35,6 +53,28 @@ public sealed partial class MapGraphLayoutGenerator
     }
 
     private static int PairArrayLength(int n) => n <= 1 ? 0 : (n * (n - 1)) / 2;
+
+    private static void ComputeWorldBounds(
+        RoomPlacement placement,
+        out Vector2Int floorMinW,
+        out Vector2Int floorMaxW,
+        out Vector2Int wallMinW,
+        out Vector2Int wallMaxW)
+    {
+        if (placement?.Shape == null)
+        {
+            floorMinW = default;
+            floorMaxW = default;
+            wallMinW = default;
+            wallMaxW = default;
+            return;
+        }
+
+        floorMinW = placement.Shape.Min + placement.Root;
+        floorMaxW = placement.Shape.Max + placement.Root;
+        wallMinW = placement.Shape.WallMin + placement.Root;
+        wallMaxW = placement.Shape.WallMax + placement.Root;
+    }
 
     private static int PairIndex(int a, int b, int n)
     {
@@ -60,7 +100,7 @@ public sealed partial class MapGraphLayoutGenerator
         // - EdgePenalty: distance penalty only for graph-adjacent pairs (when not touching)
         // Both are stored in the same packed-pair indexing.
         if (rooms == null || nodeIdByIndex == null || nodeIndexById == null)
-            return new EnergyCache(0, null, null, 0f, 0f, null, null);
+            return new EnergyCache(0, null, 0, null, null, null, null, null, null, 0f, 0f, null, null);
 
         var nodeCount = nodeIdByIndex.Length;
         var placementsByIndex = new RoomPlacement[nodeCount];
@@ -75,14 +115,25 @@ public sealed partial class MapGraphLayoutGenerator
             isPlaced[idx] = true;
         }
 
+        var floorMinW = new Vector2Int[nodeCount];
+        var floorMaxW = new Vector2Int[nodeCount];
+        var wallMinW = new Vector2Int[nodeCount];
+        var wallMaxW = new Vector2Int[nodeCount];
+
         float overlapSum = 0f;
         var pairPenalty = new float[PairArrayLength(nodeCount)];
         var placedIndices = new List<int>(rooms.Count);
         for (var i = 0; i < nodeCount; i++)
         {
             if (isPlaced[i])
+            {
                 placedIndices.Add(i);
+                ComputeWorldBounds(placementsByIndex[i], out floorMinW[i], out floorMaxW[i], out wallMinW[i], out wallMaxW[i]);
+            }
         }
+        var placedArray = new int[nodeCount];
+        for (int k = 0; k < placedIndices.Count; k++)
+            placedArray[k] = placedIndices[k];
         for (int pi = 0; pi < placedIndices.Count; pi++)
         {
             var i = placedIndices[pi];
@@ -135,18 +186,37 @@ public sealed partial class MapGraphLayoutGenerator
             }
         }
 
-        return new EnergyCache(nodeCount, placementsByIndex, isPlaced, overlapSum, distSum, pairPenalty, edgePenalty);
+        return new EnergyCache(
+            nodeCount,
+            placedArray,
+            placedIndices.Count,
+            placementsByIndex,
+            isPlaced,
+            floorMinW,
+            floorMaxW,
+            wallMinW,
+            wallMaxW,
+            overlapSum,
+            distSum,
+            pairPenalty,
+            edgePenalty);
     }
 
     private EnergyCache CloneEnergyCache(EnergyCache src)
     {
         if (src == null)
-            return new EnergyCache(0, null, null, 0f, 0f, null, null);
+            return new EnergyCache(0, null, 0, null, null, null, null, null, null, 0f, 0f, null, null);
 
         return new EnergyCache(
             src.NodeCount,
+            src.PlacedIndices != null ? (int[])src.PlacedIndices.Clone() : new int[src.NodeCount],
+            src.PlacedCount,
             src.PlacementsByIndex != null ? (RoomPlacement[])src.PlacementsByIndex.Clone() : new RoomPlacement[src.NodeCount],
             src.IsPlaced != null ? (bool[])src.IsPlaced.Clone() : new bool[src.NodeCount],
+            src.FloorMinW != null ? (Vector2Int[])src.FloorMinW.Clone() : new Vector2Int[src.NodeCount],
+            src.FloorMaxW != null ? (Vector2Int[])src.FloorMaxW.Clone() : new Vector2Int[src.NodeCount],
+            src.WallMinW != null ? (Vector2Int[])src.WallMinW.Clone() : new Vector2Int[src.NodeCount],
+            src.WallMaxW != null ? (Vector2Int[])src.WallMaxW.Clone() : new Vector2Int[src.NodeCount],
             src.OverlapPenaltySum,
             src.DistancePenaltySum,
             src.PairPenalty != null ? (float[])src.PairPenalty.Clone() : new float[PairArrayLength(src.NodeCount)],
@@ -155,6 +225,9 @@ public sealed partial class MapGraphLayoutGenerator
 
     private float ComputeEnergyIfAdded(Dictionary<string, RoomPlacement> roomsWithoutAdded, EnergyCache baseCache, RoomPlacement added)
     {
+        var deepProfile = settings != null && settings.LogLayoutProfiling;
+        using var _ps = PSIf(deepProfile, S_ComputeEnergyIfAdded);
+
         if (added == null)
             return baseCache?.TotalEnergy ?? 0f;
 
@@ -163,14 +236,18 @@ public sealed partial class MapGraphLayoutGenerator
 
         if (baseCache != null && baseCache.NodeCount > 0)
         {
-            for (var i = 0; i < baseCache.NodeCount; i++)
+            using (PSIf(deepProfile, S_ComputeEnergyIfAdded_Overlaps))
             {
-                if (!baseCache.IsPlaced[i])
-                    continue;
-                var other = baseCache.PlacementsByIndex[i];
-                if (other == null)
-                    continue;
-                overlapSum += IntersectionPenalty(added, other);
+                for (var pi = 0; pi < baseCache.PlacedCount; pi++)
+                {
+                    var i = baseCache.PlacedIndices[pi];
+                    if (i < 0 || i >= baseCache.NodeCount || !baseCache.IsPlaced[i])
+                        continue;
+                    var other = baseCache.PlacementsByIndex[i];
+                    if (other == null)
+                        continue;
+                    overlapSum += IntersectionPenalty(added, other);
+                }
             }
 
             if (nodeIndexById != null &&
@@ -179,16 +256,86 @@ public sealed partial class MapGraphLayoutGenerator
                 addedIndex >= 0 &&
                 addedIndex < neighborIndicesByIndex.Length)
             {
-                var neigh = neighborIndicesByIndex[addedIndex];
-                for (var k = 0; k < neigh.Length; k++)
+                using (PSIf(deepProfile, S_ComputeEnergyIfAdded_EdgeDistances))
                 {
-                    var j = neigh[k];
-                    if (j < 0 || j >= baseCache.NodeCount || !baseCache.IsPlaced[j])
+                    var neigh = neighborIndicesByIndex[addedIndex];
+                    for (var k = 0; k < neigh.Length; k++)
+                    {
+                        var j = neigh[k];
+                        if (j < 0 || j >= baseCache.NodeCount || !baseCache.IsPlaced[j])
+                            continue;
+                        var other = baseCache.PlacementsByIndex[j];
+                        if (other == null)
+                            continue;
+                        distSum += ComputeEdgeDistancePenalty(added, other);
+                    }
+                }
+            }
+        }
+
+        return OverlapWeight * overlapSum + DistanceWeight * distSum;
+    }
+
+    private float ComputeEnergyIfAddedAt(string addedNodeId, GameObject addedPrefab, ModuleShape addedShape, Vector2Int addedRoot, EnergyCache baseCache)
+    {
+        var deepProfile = settings != null && settings.LogLayoutProfiling;
+        using var _ps = PSIf(deepProfile, S_ComputeEnergyIfAdded);
+
+        if (addedShape == null || addedPrefab == null || string.IsNullOrEmpty(addedNodeId))
+            return baseCache?.TotalEnergy ?? 0f;
+
+        float overlapSum = baseCache?.OverlapPenaltySum ?? 0f;
+        float distSum = baseCache?.DistancePenaltySum ?? 0f;
+
+        if (baseCache != null && baseCache.NodeCount > 0)
+        {
+            using (PSIf(deepProfile, S_ComputeEnergyIfAdded_Overlaps))
+            {
+                for (var pi = 0; pi < baseCache.PlacedCount; pi++)
+                {
+                    var i = baseCache.PlacedIndices[pi];
+                    if (i < 0 || i >= baseCache.NodeCount || !baseCache.IsPlaced[i])
                         continue;
-                    var other = baseCache.PlacementsByIndex[j];
+                    var other = baseCache.PlacementsByIndex[i];
                     if (other == null)
                         continue;
-                    distSum += ComputeEdgeDistancePenalty(added, other);
+                    overlapSum += IntersectionPenaltyRaw(
+                        addedNodeId,
+                        addedPrefab,
+                        addedShape,
+                        addedRoot,
+                        other.NodeId,
+                        other.Prefab,
+                        other.Shape,
+                        other.Root);
+                }
+            }
+
+            if (nodeIndexById != null &&
+                nodeIndexById.TryGetValue(addedNodeId, out var addedIndex) &&
+                neighborIndicesByIndex != null &&
+                addedIndex >= 0 &&
+                addedIndex < neighborIndicesByIndex.Length)
+            {
+                using (PSIf(deepProfile, S_ComputeEnergyIfAdded_EdgeDistances))
+                {
+                    var neigh = neighborIndicesByIndex[addedIndex];
+                    for (var k = 0; k < neigh.Length; k++)
+                    {
+                        var j = neigh[k];
+                        if (j < 0 || j >= baseCache.NodeCount || !baseCache.IsPlaced[j])
+                            continue;
+                        var other = baseCache.PlacementsByIndex[j];
+                        if (other == null)
+                            continue;
+                        distSum += ComputeEdgeDistancePenaltyRaw(
+                            addedPrefab,
+                            addedShape,
+                            addedRoot,
+                            other.Prefab,
+                            other.Shape,
+                            other.Root);
+                    }
                 }
             }
         }
@@ -205,14 +352,19 @@ public sealed partial class MapGraphLayoutGenerator
         if (addedIndex < 0 || addedIndex >= cache.NodeCount)
             return;
 
+        var wasPlaced = cache.IsPlaced[addedIndex];
         cache.PlacementsByIndex[addedIndex] = added;
         cache.IsPlaced[addedIndex] = true;
+        ComputeWorldBounds(added, out cache.FloorMinW[addedIndex], out cache.FloorMaxW[addedIndex], out cache.WallMinW[addedIndex], out cache.WallMaxW[addedIndex]);
+        if (!wasPlaced && cache.PlacedCount < cache.PlacedIndices.Length)
+            cache.PlacedIndices[cache.PlacedCount++] = addedIndex;
 
         var overlapSum = cache.OverlapPenaltySum;
         var distSum = cache.DistancePenaltySum;
 
-        for (var i = 0; i < cache.NodeCount; i++)
+        for (var pi = 0; pi < cache.PlacedCount; pi++)
         {
+            var i = cache.PlacedIndices[pi];
             if (i == addedIndex || !cache.IsPlaced[i])
                 continue;
             var other = cache.PlacementsByIndex[i];

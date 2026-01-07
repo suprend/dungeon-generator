@@ -10,6 +10,8 @@ public sealed partial class MapGraphLayoutGenerator
         public ShapeLibrary ShapeLibrary { get; set; }
         public ConfigurationSpaceLibrary ConfigSpaceLibrary { get; set; }
         public Dictionary<string, List<GameObject>> RoomPrefabLookup { get; set; }
+        public Dictionary<string, MapGraphAsset.NodeData> NodeById { get; set; }
+        public Dictionary<RoomTypeAsset, List<GameObject>> PrefabsByRoomType { get; set; }
         public HashSet<GameObject> ConnectorPrefabs { get; set; }
         public Dictionary<string, HashSet<string>> NeighborLookup { get; set; }
         public Dictionary<string, int> NodeIndexById { get; set; }

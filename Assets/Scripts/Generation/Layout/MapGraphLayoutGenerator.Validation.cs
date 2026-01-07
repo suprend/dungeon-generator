@@ -6,6 +6,8 @@ using UnityEngine;
 
 public sealed partial class MapGraphLayoutGenerator
 {
+    private readonly List<RoomPlacement> validateRoomsScratch = new();
+
     private bool TryValidateGlobal(Dictionary<string, RoomPlacement> rooms, out string error)
     {
         error = null;
@@ -78,7 +80,10 @@ public sealed partial class MapGraphLayoutGenerator
             return false;
         }
 
-        var list = rooms.Values.ToList();
+        validateRoomsScratch.Clear();
+        foreach (var p in rooms.Values)
+            validateRoomsScratch.Add(p);
+        var list = validateRoomsScratch;
         for (int i = 0; i < list.Count; i++)
         {
             for (int j = i + 1; j < list.Count; j++)
@@ -98,14 +103,18 @@ public sealed partial class MapGraphLayoutGenerator
                 TryGetBiteAllowance(a, b, out var allowedFloorOverlap, out var allowedWallA, out var allowedWallB);
 
                 var deltaBA = b.Root - a.Root;
-                var floorOverlapIllegal = CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloorOverlap, a.Root, out var overlapCellWorld, earlyStopAtTwo: true);
+                var floorOverlapIllegal = settings != null && settings.UseBitsetOverlap
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.FloorFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var overlapCellWorld)
+                    : CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloorOverlap, a.Root, out overlapCellWorld, earlyStopAtTwo: true);
                 if (floorOverlapIllegal > 0)
                 {
                     error = $"Layout invalid: floor overlap between {a.NodeId} and {b.NodeId} (count={floorOverlapIllegal}, cell={overlapCellWorld}).";
                     return false;
                 }
 
-                var wallOnFloorA = CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out var badA, earlyStopAtTwo: true);
+                var wallOnFloorA = settings != null && settings.UseBitsetOverlap
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.AWallOnBFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var badA)
+                    : CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out badA, earlyStopAtTwo: true);
                 if (wallOnFloorA > 0)
                 {
                     error = $"Layout invalid: wall({a.NodeId}) overlaps floor({b.NodeId}) at {badA}.";
@@ -113,7 +122,9 @@ public sealed partial class MapGraphLayoutGenerator
                 }
 
                 var deltaAB = a.Root - b.Root;
-                var wallOnFloorB = CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out var badB, earlyStopAtTwo: true);
+                var wallOnFloorB = settings != null && settings.UseBitsetOverlap
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.BWallOnAFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var badB)
+                    : CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out badB, earlyStopAtTwo: true);
                 if (wallOnFloorB > 0)
                 {
                     error = $"Layout invalid: wall({b.NodeId}) overlaps floor({a.NodeId}) at {badB}.";
@@ -151,6 +162,119 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         return true;
+    }
+
+    private enum OverlapType : byte
+    {
+        FloorFloor = 0,
+        AWallOnBFloor = 1,
+        BWallOnAFloor = 2
+    }
+
+    private int CountIllegalOverlapBitset(
+        RoomPlacement a,
+        RoomPlacement b,
+        OverlapType overlapType,
+        AllowedWorldCells allowedFloorOverlap,
+        AllowedWorldCells allowedWallA,
+        AllowedWorldCells allowedWallB,
+        out Vector2Int lastOverlapWorld)
+    {
+        lastOverlapWorld = default;
+        if (a?.Shape == null || b?.Shape == null)
+            return 0;
+
+        var bitsA = GetBitsets(a.Shape);
+        var bitsB = GetBitsets(b.Shape);
+        if (bitsA == null || bitsB == null)
+            return 0;
+
+        BitGrid fixedGrid;
+        BitGrid movingGrid;
+        AllowedWorldCells allowed;
+        Vector2Int fixedRoot;
+        Vector2Int delta;
+
+        switch (overlapType)
+        {
+            case OverlapType.FloorFloor:
+                fixedGrid = bitsA.Floor;
+                movingGrid = bitsB.Floor;
+                allowed = allowedFloorOverlap;
+                fixedRoot = a.Root;
+                delta = b.Root - a.Root;
+                break;
+            case OverlapType.AWallOnBFloor:
+                fixedGrid = bitsA.Wall;
+                movingGrid = bitsB.Floor;
+                allowed = allowedWallA;
+                fixedRoot = a.Root;
+                delta = b.Root - a.Root;
+                break;
+            case OverlapType.BWallOnAFloor:
+                fixedGrid = bitsB.Wall;
+                movingGrid = bitsA.Floor;
+                allowed = allowedWallB;
+                fixedRoot = b.Root;
+                delta = a.Root - b.Root;
+                break;
+            default:
+                return 0;
+        }
+
+        if (fixedGrid == null || movingGrid == null)
+            return 0;
+
+        var shift = (movingGrid.Min + delta) - fixedGrid.Min;
+        return fixedGrid.CountIllegalOverlapsShifted(movingGrid, shift, fixedRoot, allowed, earlyStopAtTwo: true, out lastOverlapWorld);
+    }
+
+    private int CountIllegalOverlapFallback(
+        RoomPlacement a,
+        RoomPlacement b,
+        OverlapType overlapType,
+        AllowedWorldCells allowedFloorOverlap,
+        AllowedWorldCells allowedWallA,
+        AllowedWorldCells allowedWallB,
+        out Vector2Int lastOverlapWorld)
+    {
+        // Only used when bitset mode is disabled.
+        lastOverlapWorld = default;
+        if (a?.Shape == null || b?.Shape == null)
+            return 0;
+
+        switch (overlapType)
+        {
+            case OverlapType.FloorFloor:
+                return CountOverlapShifted(
+                    a.Shape.FloorCells,
+                    b.Shape.FloorCells,
+                    b.Root - a.Root,
+                    allowedFloorOverlap,
+                    a.Root,
+                    out lastOverlapWorld,
+                    earlyStopAtTwo: true);
+            case OverlapType.AWallOnBFloor:
+                return CountOverlapShifted(
+                    a.Shape.WallCells,
+                    b.Shape.FloorCells,
+                    b.Root - a.Root,
+                    allowedWallA,
+                    a.Root,
+                    out lastOverlapWorld,
+                    earlyStopAtTwo: true);
+            case OverlapType.BWallOnAFloor:
+                return CountOverlapShifted(
+                    b.Shape.WallCells,
+                    a.Shape.FloorCells,
+                    a.Root - b.Root,
+                    allowedWallB,
+                    b.Root,
+                    out lastOverlapWorld,
+                    earlyStopAtTwo: true);
+            default:
+                return 0;
+        }
     }
 
     private bool IsValidLayout(Dictionary<string, RoomPlacement> rooms)

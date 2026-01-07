@@ -368,7 +368,21 @@ public sealed partial class MapGraphLayoutGenerator
                 continue;
 
             var delta = other.Root - candidate.Root;
-            var overlapCount = CountOverlapShifted(candidateFloor, otherFloor, delta, AllowedWorldCells.None, candidate.Root, out _, earlyStopAtTwo: true);
+            var overlapCount = 0;
+            if (settings != null && settings.UseBitsetOverlap)
+            {
+                var bitsCandidate = GetBitsets(candidate.Shape);
+                var bitsOther = GetBitsets(other.Shape);
+                if (bitsCandidate?.Floor != null && bitsOther?.Floor != null)
+                {
+                    var shift = (bitsOther.Floor.Min + delta) - bitsCandidate.Floor.Min;
+                    overlapCount = bitsCandidate.Floor.CountIllegalOverlapsShifted(bitsOther.Floor, shift, candidate.Root, AllowedWorldCells.None, earlyStopAtTwo: true, out _);
+                }
+            }
+            else
+            {
+                overlapCount = CountOverlapShifted(candidateFloor, otherFloor, delta, AllowedWorldCells.None, candidate.Root, out _, earlyStopAtTwo: true);
+            }
             if (overlapCount <= 0)
                 continue;
 

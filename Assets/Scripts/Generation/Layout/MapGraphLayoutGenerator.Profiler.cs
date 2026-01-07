@@ -60,6 +60,14 @@ public sealed partial class MapGraphLayoutGenerator
     private const string S_StackSearch_ExpandChain = "Layout.StackSearch.ExpandChain";
     private const string S_StackSearch_Push = "Layout.StackSearch.Push";
     private const string S_TryValidateGlobal = "Layout.TryValidateGlobal";
+    private const string S_GetBitsets = "Layout.GetBitsets";
+    private const string S_ComputeWorldBounds = "Layout.ComputeWorldBounds";
+    private const string S_GetBiteAllowance = "Layout.GetBiteAllowance";
+    private const string S_GetRoomPrefabs = "Layout.GetRoomPrefabs";
+    private const string S_AddPlacementToCache = "Layout.AddPlacementToCache";
+    private const string S_CloneRoomsDeep = "Layout.CloneRoomsDeep";
+    private const string S_UndoMove = "Layout.UndoMove";
+
 
     private static ProfilerSample PS(string name) => new(name);
     private static ProfilerSample PSIf(bool enabled, string name) => new(name, enabled);

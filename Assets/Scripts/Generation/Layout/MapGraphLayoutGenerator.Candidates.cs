@@ -8,6 +8,7 @@ public sealed partial class MapGraphLayoutGenerator
     private readonly List<(RoomPlacement placement, ConfigurationSpace space)> neighborRootsScratch = new();
     private readonly List<Vector2Int> candidatesScratch = new();
     private readonly Dictionary<Vector2Int, int> scoredScratch = new();
+    private readonly BitGrid scratchGrid = new BitGrid(Vector2Int.zero, 0, 0, 0, new ulong[0], 0);
 
     private void FindPositionCandidates(string nodeId, GameObject prefab, ModuleShape shape, Dictionary<string, RoomPlacement> placed, List<Vector2Int> result, bool allowExistingRoot = false)
     {
@@ -70,12 +71,36 @@ public sealed partial class MapGraphLayoutGenerator
             return;
         }
 
-        // Start intersection from the smallest config-space to keep candidate list small.
+        // FAST PATH: Single neighbor - use precomputed OffsetsList directly
+        if (neighborRootsScratch.Count == 1)
+        {
+            var neighbor = neighborRootsScratch[0].placement;
+            var space = neighborRootsScratch[0].space;
+            var offsets = space.OffsetsList;
+
+            candidatesScratch.Clear();
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, offsets.Count);
+
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                candidatesScratch.Add(neighbor.Root + offsets[i]);
+            }
+
+            if (result != null)
+                result.AddRange(candidatesScratch);
+
+            return;
+        }
+
+        // SLOW PATH: Multiple neighbors - use BitGrid intersection
+        // Optimized intersection using BitGrid
         var baseIndex = 0;
         var bestCount = int.MaxValue;
         for (var i = 0; i < neighborRootsScratch.Count; i++)
         {
-            var c = neighborRootsScratch[i].space?.Offsets?.Count ?? int.MaxValue;
+            var s = neighborRootsScratch[i].space;
+            var c = s?.Offsets?.Count ?? int.MaxValue;
+            // Prefer smaller grids for less cloning work
             if (c < bestCount)
             {
                 bestCount = c;
@@ -84,29 +109,62 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         var baseNeighbor = neighborRootsScratch[baseIndex];
-        candidatesScratch.Clear();
-        var baseOffsets = baseNeighbor.space.OffsetsList;
-        for (var i = 0; i < baseOffsets.Count; i++)
-            candidatesScratch.Add(baseNeighbor.placement.Root + baseOffsets[i]);
+        var baseGrid = baseNeighbor.space.Grid;
 
-        var totalOffsets = candidatesScratch.Count;
-
-        for (int i = 0; i < neighborRootsScratch.Count; i++)
+        if (baseGrid != null)
         {
-            if (i == baseIndex)
-                continue;
-            var next = neighborRootsScratch[i];
-            var write = 0;
-            for (int read = 0; read < candidatesScratch.Count; read++)
+            scratchGrid.CopyFrom(baseGrid);
+            var baseRoot = baseNeighbor.placement.Root;
+
+            for (int i = 0; i < neighborRootsScratch.Count; i++)
             {
-                var pos = candidatesScratch[read];
-                if (next.space.Contains(pos - next.placement.Root))
-                    candidatesScratch[write++] = pos;
+                if (i == baseIndex)
+                    continue;
+                var next = neighborRootsScratch[i];
+                if (next.space.Grid == null)
+                {
+                    System.Array.Clear(scratchGrid.Bits, 0, scratchGrid.Bits.Length);
+                    break;
+                }
+                var shift = next.placement.Root - baseRoot;
+                scratchGrid.AndShifted(next.space.Grid, shift);
             }
-            if (write < candidatesScratch.Count)
-                candidatesScratch.RemoveRange(write, candidatesScratch.Count - write);
-            if (candidatesScratch.Count == 0)
-                break;
+
+            // Extract bit positions - managed loop with pre-capacity
+            int wordsPerRow = scratchGrid.WordsPerRow;
+            ulong[] bits = scratchGrid.Bits;
+            int h = scratchGrid.Height;
+            int minX = scratchGrid.Min.x;
+            int minY = scratchGrid.Min.y;
+
+            candidatesScratch.Clear();
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, scratchGrid.Width * scratchGrid.Height);
+
+            for (int r = 0; r < h; r++)
+            {
+                int rowStart = r * wordsPerRow;
+                int y = minY + r;
+                for (int w = 0; w < wordsPerRow; w++)
+                {
+                    ulong word = bits[rowStart + w];
+                    if (word == 0) continue;
+                    
+                    int baseX = minX + (w << 6);
+                    while (word != 0)
+                    {
+                        var tz = BitGrid.TrailingZeroCount(word);
+                        var x = baseX + tz;
+                        candidatesScratch.Add(baseRoot + new Vector2Int(x, y));
+                        word &= word - 1;
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Fallback if BitGrid creation failed (unlikely)
+             candidatesScratch.Clear();
+             // Logic would go here but with lazy initialization/null check it should be fine.
         }
 
         if (result != null)
@@ -114,6 +172,7 @@ public sealed partial class MapGraphLayoutGenerator
 
         if (result == null || result.Count == 0)
         {
+            // Fallback strategies (scoring etc)
             scoredScratch.Clear();
             foreach (var (neighbor, space) in neighborRootsScratch)
             {
@@ -152,7 +211,7 @@ public sealed partial class MapGraphLayoutGenerator
         if (result == null || result.Count == 0)
         {
             var neighborInfo = string.Join("; ", neighborRootsScratch.Select(n => $"{n.placement.NodeId}:{n.space.Offsets.Count}"));
-            Debug.LogWarning($"[LayoutGenerator] No position candidates for node {nodeId} prefab {prefab.name}. Offsets before overlap: {totalOffsets}. Neighbors: {neighborInfo}");
+            Debug.LogWarning($"[LayoutGenerator] No position candidates for node {nodeId} prefab {prefab.name}. Neighbors: {neighborInfo}");
         }
 
         if (profiling != null)
@@ -242,12 +301,35 @@ public sealed partial class MapGraphLayoutGenerator
             return;
         }
 
-        // Start intersection from the smallest config-space to keep candidate list small.
+        // FAST PATH: Single neighbor - use precomputed OffsetsList directly
+        if (neighborRootsScratch.Count == 1)
+        {
+            var neighbor = neighborRootsScratch[0].placement;
+            var space = neighborRootsScratch[0].space;
+            var offsets = space.OffsetsList;
+
+            candidatesScratch.Clear();
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, offsets.Count);
+
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                candidatesScratch.Add(neighbor.Root + offsets[i]);
+            }
+
+            if (result != null)
+                result.AddRange(candidatesScratch);
+
+            return;
+        }
+
+        // SLOW PATH: Multiple neighbors - use BitGrid intersection
+        // Optimized intersection using BitGrid
         var baseIndex = 0;
         var bestCount = int.MaxValue;
         for (var i = 0; i < neighborRootsScratch.Count; i++)
         {
-            var c = neighborRootsScratch[i].space?.Offsets?.Count ?? int.MaxValue;
+            var s = neighborRootsScratch[i].space;
+            var c = s?.Offsets?.Count ?? int.MaxValue;
             if (c < bestCount)
             {
                 bestCount = c;
@@ -256,27 +338,60 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         var baseNeighbor = neighborRootsScratch[baseIndex];
-        candidatesScratch.Clear();
-        var baseOffsets = baseNeighbor.space.OffsetsList;
-        for (var i = 0; i < baseOffsets.Count; i++)
-            candidatesScratch.Add(baseNeighbor.placement.Root + baseOffsets[i]);
+        var baseGrid = baseNeighbor.space.Grid;
 
-        for (int i = 0; i < neighborRootsScratch.Count; i++)
+        if (baseGrid != null)
         {
-            if (i == baseIndex)
-                continue;
-            var next = neighborRootsScratch[i];
-            var write = 0;
-            for (int read = 0; read < candidatesScratch.Count; read++)
+            scratchGrid.CopyFrom(baseGrid);
+            var baseRoot = baseNeighbor.placement.Root;
+
+            for (int i = 0; i < neighborRootsScratch.Count; i++)
             {
-                var pos = candidatesScratch[read];
-                if (next.space.Contains(pos - next.placement.Root))
-                    candidatesScratch[write++] = pos;
+                if (i == baseIndex)
+                    continue;
+                var next = neighborRootsScratch[i];
+                if (next.space.Grid == null)
+                {
+                     System.Array.Clear(scratchGrid.Bits, 0, scratchGrid.Bits.Length);
+                     break;
+                }
+                var shift = next.placement.Root - baseRoot;
+                scratchGrid.AndShifted(next.space.Grid, shift);
             }
-            if (write < candidatesScratch.Count)
-                candidatesScratch.RemoveRange(write, candidatesScratch.Count - write);
-            if (candidatesScratch.Count == 0)
-                break;
+
+            // Extract bit positions - managed loop with pre-capacity
+            int wordsPerRow = scratchGrid.WordsPerRow;
+            ulong[] bits = scratchGrid.Bits;
+            int h = scratchGrid.Height;
+            int minX = scratchGrid.Min.x;
+            int minY = scratchGrid.Min.y;
+
+            candidatesScratch.Clear();
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, scratchGrid.Width * scratchGrid.Height);
+
+            for (int r = 0; r < h; r++)
+            {
+                int rowStart = r * wordsPerRow;
+                int y = minY + r;
+                for (int w = 0; w < wordsPerRow; w++)
+                {
+                    ulong word = bits[rowStart + w];
+                    if (word == 0) continue;
+                    
+                    int baseX = minX + (w << 6);
+                    while (word != 0)
+                    {
+                        var tz = BitGrid.TrailingZeroCount(word);
+                        var x = baseX + tz;
+                        candidatesScratch.Add(baseRoot + new Vector2Int(x, y));
+                        word &= word - 1;
+                    }
+                }
+            }
+        }
+        else
+        {
+             candidatesScratch.Clear();
         }
 
         if (result != null)

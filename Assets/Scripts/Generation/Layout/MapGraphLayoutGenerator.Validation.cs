@@ -102,6 +102,21 @@ public sealed partial class MapGraphLayoutGenerator
 
                 TryGetBiteAllowance(a, b, out var allowedFloorOverlap, out var allowedWallA, out var allowedWallB);
 
+                // AABB Optimization: Broadphase check
+                // Use WallMin/WallMax as they contain FloorCells. If walls bounding boxes don't overlap, nothing overlaps.
+                if (a.Shape != null && b.Shape != null)
+                {
+                    var rootA = a.Root;
+                    var rootB = b.Root;
+                    var minA = rootA + a.Shape.WallMin;
+                    var maxA = rootA + a.Shape.WallMax;
+                    var minB = rootB + b.Shape.WallMin;
+                    var maxB = rootB + b.Shape.WallMax;
+                    
+                    if (!BoundsOverlap(minA, maxA, minB, maxB))
+                        continue;
+                }
+
                 var deltaBA = b.Root - a.Root;
                 var floorOverlapIllegal = settings != null && settings.UseBitsetOverlap
                     ? CountIllegalOverlapBitset(a, b, OverlapType.FloorFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var overlapCellWorld)

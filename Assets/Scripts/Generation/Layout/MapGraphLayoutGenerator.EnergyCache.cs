@@ -88,7 +88,7 @@ public sealed partial class MapGraphLayoutGenerator
             a = b;
             b = t;
         }
-        var rowStart = a * (n - 1) - (a * (a + 1)) / 2;
+        var rowStart = a * (n - 1) - (a * (a - 1)) / 2;
         return rowStart + (b - a - 1);
     }
 

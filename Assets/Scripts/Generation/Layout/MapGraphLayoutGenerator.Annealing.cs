@@ -133,18 +133,8 @@ public sealed partial class MapGraphLayoutGenerator
 
         using (PS(S_Perturb_GenerateCandidates))
         {
-            if (rng.NextDouble() < 0.5)
-            {
-                FindPositionCandidates(
-                    targetIndex,
-                    newPrefab,
-                    newShape,
-                    energyCache,
-                    positionCandidates,
-                    allowExistingRoot: !changeShape,
-                    existingRoot: targetPlacement.Root);
-            }
-            else
+            var wiggleProbability = settings != null ? Mathf.Clamp01(settings.WiggleProbability) : 0.5f;
+            if (rng.NextDouble() < wiggleProbability)
             {
                 WiggleCandidates(targetIndex, newPrefab, energyCache, wiggleCandidates);
                 if (wiggleCandidates.Count == 0)
@@ -156,6 +146,17 @@ public sealed partial class MapGraphLayoutGenerator
                         positionCandidates,
                         allowExistingRoot: !changeShape,
                         existingRoot: targetPlacement.Root);
+            }
+            else
+            {
+                FindPositionCandidates(
+                    targetIndex,
+                    newPrefab,
+                    newShape,
+                    energyCache,
+                    positionCandidates,
+                    allowExistingRoot: !changeShape,
+                    existingRoot: targetPlacement.Root);
             }
         }
 
@@ -254,7 +255,10 @@ public sealed partial class MapGraphLayoutGenerator
                 for (var idxA = 0; idxA < offsA.Count; idxA++)
                 {
                     var pos = a.placement.Root + offsA[idxA];
-                    if (!b.space.Contains(pos - b.placement.Root))
+                    var delta = pos - b.placement.Root;
+                    
+                    // Fast BitGrid lookup instead of HashSet
+                    if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
                         continue;
 
                     seen++;
@@ -389,7 +393,10 @@ public sealed partial class MapGraphLayoutGenerator
                 for (var idxA = 0; idxA < offsA.Count; idxA++)
                 {
                     var pos = a.placement.Root + offsA[idxA];
-                    if (!b.space.Contains(pos - b.placement.Root))
+                    var delta = pos - b.placement.Root;
+                    
+                    // Fast BitGrid lookup instead of HashSet
+                    if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
                         continue;
 
                     seen++;
@@ -559,6 +566,7 @@ public sealed partial class MapGraphLayoutGenerator
         List<PairPenaltyChange> pairChanges,
         List<EdgePenaltyChange> edgeChanges)
     {
+        using var _ps = PS(S_UndoMove);
         if (rooms == null || energyCache == null || string.IsNullOrEmpty(undo.NodeId) || undo.Placement == null)
             return;
 

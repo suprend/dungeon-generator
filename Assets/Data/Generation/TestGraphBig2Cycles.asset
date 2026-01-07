@@ -23,8 +23,102 @@ MonoBehaviour:
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
     position: {x: 595.9313, y: -210.5555}
+  - id: 9808f4b9dc04456bbd84057c03dc8d51
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 590.65717, y: 73.106606}
+  - id: 784d392bab464a35916ea0c334c243bd
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 734.5464, y: -45.61339}
+  - id: 1cdc0848c99846178532efa7271cd223
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 427.6134, y: -64.079895}
+  - id: e0769a1987a5474caa10bf8ea978ebd7
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 588.92957, y: 176.53511}
+  - id: 99049bd7699240cd898fd0e4f9ceeac7
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 731.5997, y: 264.95706}
+  - id: c6ba259dbe88493cb94f9a40112ba595
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 458.68646, y: 262.2715}
+  - id: 6e8df910ccb14d30afd16a89eb08fd94
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 592.82996, y: 357.0814}
+  - id: dedbd939f9d2415cb81539ebf31e7344
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 598.415, y: -306.82742}
+  - id: e9e2a0d5ce4646a5b9963e0cf536ca10
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 700.52466, y: -368.78058}
+  - id: 6c746c4f58f246f7a25cc7b8458feca8
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 598.58575, y: -430.44147}
+  - id: c993fc5cf27748a7af64a18edd45669c
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 490.57343, y: -373.84152}
   edges:
   - fromNodeId: d624a655a1454abca3b8d9314adf3db8
+    toNodeId: 502bb981d05544fbaa0bf83a39929ef3
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: d624a655a1454abca3b8d9314adf3db8
+    toNodeId: 9808f4b9dc04456bbd84057c03dc8d51
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: d624a655a1454abca3b8d9314adf3db8
+    toNodeId: 784d392bab464a35916ea0c334c243bd
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 1cdc0848c99846178532efa7271cd223
+    toNodeId: d624a655a1454abca3b8d9314adf3db8
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 9808f4b9dc04456bbd84057c03dc8d51
+    toNodeId: e0769a1987a5474caa10bf8ea978ebd7
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: c6ba259dbe88493cb94f9a40112ba595
+    toNodeId: 6e8df910ccb14d30afd16a89eb08fd94
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 99049bd7699240cd898fd0e4f9ceeac7
+    toNodeId: 6e8df910ccb14d30afd16a89eb08fd94
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: e0769a1987a5474caa10bf8ea978ebd7
+    toNodeId: c6ba259dbe88493cb94f9a40112ba595
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: e0769a1987a5474caa10bf8ea978ebd7
+    toNodeId: 99049bd7699240cd898fd0e4f9ceeac7
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: c993fc5cf27748a7af64a18edd45669c
+    toNodeId: dedbd939f9d2415cb81539ebf31e7344
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: dedbd939f9d2415cb81539ebf31e7344
+    toNodeId: e9e2a0d5ce4646a5b9963e0cf536ca10
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: c993fc5cf27748a7af64a18edd45669c
+    toNodeId: 6c746c4f58f246f7a25cc7b8458feca8
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 6c746c4f58f246f7a25cc7b8458feca8
+    toNodeId: e9e2a0d5ce4646a5b9963e0cf536ca10
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: dedbd939f9d2415cb81539ebf31e7344
     toNodeId: 502bb981d05544fbaa0bf83a39929ef3
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}

@@ -483,7 +483,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57eaa7cb68fb144609efd7942205778f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  graph: {fileID: 11400000, guid: e910749af79764098b9747d8875a1f31, type: 2}
+  graph: {fileID: 11400000, guid: 0830201a41dc24a51b1e0d8f90bd57d8, type: 2}
   targetGrid: {fileID: 436320409}
   floorMap: {fileID: 1873774723}
   wallMap: {fileID: 641276130}
@@ -497,15 +497,17 @@ MonoBehaviour:
   temperatureSteps: 24
   innerIterations: 256
   cooling: 0.85
+  changePrefabProbability: 0.1
   maxWiggleCandidates: 64
   maxFallbackCandidates: 1024
   layoutAttempts: 1
   logConfigSpaceSizeSummary: 0
   maxConfigSpaceSizePairs: 12
   logLayoutProfiling: 0
+  useBitsetOverlap: 1
   verboseConfigSpaceLogs: 0
   maxConfigSpaceLogs: 32
-  debugNoLayouts: 1
+  debugNoLayouts: 0
   debugNoLayoutsTopPairs: 6
   debugNoLayoutsTopEdges: 16
 --- !u!1 &1103427778

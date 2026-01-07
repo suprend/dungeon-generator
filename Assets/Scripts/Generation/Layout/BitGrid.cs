@@ -31,7 +31,10 @@ public sealed class BitGrid
             return null;
 
         var wordsPerRow = (width + 63) >> 6;
-        var bits = new ulong[wordsPerRow * height];
+        long totalWords = (long)wordsPerRow * height;
+        if (totalWords > 100_000_000) // 100M ulongs = 800MB. Sanity check.
+             return null;
+        var bits = new ulong[(int)totalWords];
         var rem = width & 63;
         var lastMask = rem == 0 ? ulong.MaxValue : ((1UL << rem) - 1UL);
 
@@ -43,14 +46,14 @@ public sealed class BitGrid
                 continue;
             var word = rx >> 6;
             var bit = rx & 63;
-            bits[ry * wordsPerRow + word] |= 1UL << bit;
+            bits[(long)ry * wordsPerRow + word] |= 1UL << bit;
         }
 
         if (lastMask != ulong.MaxValue)
         {
             for (int y = 0; y < height; y++)
             {
-                var idx = y * wordsPerRow + (wordsPerRow - 1);
+                var idx = (long)y * wordsPerRow + (wordsPerRow - 1);
                 bits[idx] &= lastMask;
             }
         }
@@ -64,7 +67,7 @@ public sealed class BitGrid
         var ry = localCell.y - Min.y;
         if ((uint)rx >= (uint)Width || (uint)ry >= (uint)Height)
             return false;
-        var idx = ry * WordsPerRow + (rx >> 6);
+        var idx = (long)ry * WordsPerRow + (rx >> 6);
         return (Bits[idx] & (1UL << (rx & 63))) != 0;
     }
 
@@ -100,7 +103,7 @@ public sealed class BitGrid
             return false;
         
         // Check bit
-        int idx = y * WordsPerRow + wordIdx;
+        long idx = (long)y * WordsPerRow + wordIdx;
         return (Bits[idx] & (1UL << bitIdx)) != 0;
     }
 

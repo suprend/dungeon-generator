@@ -1,0 +1,79 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d9559d3050034de58ed4a513445a679, type: 3}
+  m_Name: TestGraph
+  m_EditorClassIdentifier: 
+  nodes:
+  - id: d624a655a1454abca3b8d9314adf3db8
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 597, y: -50}
+  - id: 502bb981d05544fbaa0bf83a39929ef3
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 595.9313, y: -210.5555}
+  - id: bac83fd3bf7f477693df3ac8cbac2130
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 340.83334, y: -201.59523}
+  - id: 949cdfcf5c6f4f2eaa05965ebb3f2a29
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 596.48456, y: -348.98032}
+  - id: e6a2eaa2c2d941f1b544d1a49861d648
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 695.33075, y: 47.617172}
+  - id: 5860729b81764fbcb857c8ee6417bbb0
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 794.7314, y: -345.00476}
+  - id: 945f7fd1fbf54f40bed2bed1fb623a51
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 171.7619, y: -94.190475}
+  - id: 17c7451fb4c646fb8f76d507bdb0da12
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 1001.8886, y: -343.6867}
+  edges:
+  - fromNodeId: d624a655a1454abca3b8d9314adf3db8
+    toNodeId: 502bb981d05544fbaa0bf83a39929ef3
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 502bb981d05544fbaa0bf83a39929ef3
+    toNodeId: 949cdfcf5c6f4f2eaa05965ebb3f2a29
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: bac83fd3bf7f477693df3ac8cbac2130
+    toNodeId: 502bb981d05544fbaa0bf83a39929ef3
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: d624a655a1454abca3b8d9314adf3db8
+    toNodeId: e6a2eaa2c2d941f1b544d1a49861d648
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 949cdfcf5c6f4f2eaa05965ebb3f2a29
+    toNodeId: 5860729b81764fbcb857c8ee6417bbb0
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 945f7fd1fbf54f40bed2bed1fb623a51
+    toNodeId: bac83fd3bf7f477693df3ac8cbac2130
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 5860729b81764fbcb857c8ee6417bbb0
+    toNodeId: 17c7451fb4c646fb8f76d507bdb0da12
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+  defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

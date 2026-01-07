@@ -138,11 +138,12 @@ public sealed partial class MapGraphLayoutGenerator
             int minY = scratchGrid.Min.y;
 
             candidatesScratch.Clear();
-            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, scratchGrid.Width * scratchGrid.Height);
+            long totalCells = (long)scratchGrid.Width * scratchGrid.Height;
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, (int)Mathf.Clamp(totalCells, 0, 10_000_000));
 
             for (int r = 0; r < h; r++)
             {
-                int rowStart = r * wordsPerRow;
+                long rowStart = (long)r * wordsPerRow;
                 int y = minY + r;
                 for (int w = 0; w < wordsPerRow; w++)
                 {
@@ -367,11 +368,12 @@ public sealed partial class MapGraphLayoutGenerator
             int minY = scratchGrid.Min.y;
 
             candidatesScratch.Clear();
-            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, scratchGrid.Width * scratchGrid.Height);
+            long totalCells = (long)scratchGrid.Width * scratchGrid.Height;
+            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, (int)Mathf.Clamp(totalCells, 0, 10_000_000));
 
             for (int r = 0; r < h; r++)
             {
-                int rowStart = r * wordsPerRow;
+                long rowStart = (long)r * wordsPerRow;
                 int y = minY + r;
                 for (int w = 0; w < wordsPerRow; w++)
                 {

@@ -33,18 +33,18 @@ public static unsafe class BitGridBurst
         // Clear rows before valid range
         if (yMinValid > 0)
         {
-            var len = yMinValid * fixedWords;
-            for (int i = 0; i < len; i++)
+            long len = (long)yMinValid * fixedWords;
+            for (long i = 0; i < len; i++)
                 fixedBits[i] = 0;
         }
 
         // Clear rows after valid range
         if (yMaxValid < fixedH - 1)
         {
-            var start = (yMaxValid + 1) * fixedWords;
-            var totalLen = fixedWords * fixedH;
-            var len = totalLen - start;
-            for (int i = 0; i < len; i++)
+            long start = (long)(yMaxValid + 1) * fixedWords;
+            long totalLen = (long)fixedWords * fixedH;
+            long len = totalLen - start;
+            for (long i = 0; i < len; i++)
                 fixedBits[start + i] = 0;
         }
 
@@ -53,8 +53,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
                 var n = math.min(fixedWords, movingWords);
 
                 for (int i = 0; i < n; i++)
@@ -73,8 +73,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 if (wordShift > 0)
                 {
@@ -117,8 +117,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 var iFEnd = math.min(fixedWords - 1, movingWords - 1 - wordShift);
 
@@ -163,7 +163,7 @@ public static unsafe class BitGridBurst
         for (int r = 0; r < height; r++)
         {
             int y = minY + r;
-            int rowStart = r * wordsPerRow;
+            long rowStart = (long)r * wordsPerRow;
 
             for (int w = 0; w < wordsPerRow; w++)
             {
@@ -213,8 +213,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
                 var n = math.min(fixedWords, movingWords);
 
                 for (int i = 0; i < n; i++)
@@ -235,8 +235,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 var iFStart = math.max(0, wordShift);
                 var iFEnd = math.min(fixedWords - 1, wordShift + movingWords - 1);
@@ -264,8 +264,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 var iFEnd = math.min(fixedWords - 1, movingWords - 1 - wordShift);
 
@@ -308,8 +308,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
                 var n = math.min(fixedWords, movingWords);
 
                 for (int i = 0; i < n; i++)
@@ -332,8 +332,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 var iFStart = math.max(0, wordShift);
                 var iFEnd = math.min(fixedWords - 1, wordShift + movingWords - 1);
@@ -364,8 +364,8 @@ public static unsafe class BitGridBurst
             for (int yM = yStartMoving; yM <= yEndMoving; yM++)
             {
                 var yF = yM + sy;
-                var fixedRow = yF * fixedWords;
-                var movingRow = yM * movingWords;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
 
                 var iFEnd = math.min(fixedWords - 1, movingWords - 1 - wordShift);
 

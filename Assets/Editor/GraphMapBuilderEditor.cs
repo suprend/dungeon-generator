@@ -142,6 +142,9 @@ public sealed class GraphMapBuilderEditor : Editor
             EditorGUILayout.Space(4);
             DrawProp(nameof(GraphMapBuilder.maxWiggleCandidates), "Max Wiggle Candidates", "Limit for CS-based move candidates (fast path).");
             DrawProp(nameof(GraphMapBuilder.maxFallbackCandidates), "Max Fallback Candidates", "Limit for non-CS candidates (slow fallback).");
+
+            EditorGUILayout.Space(4);
+            DrawProp(nameof(GraphMapBuilder.useBitsetOverlap), "Use Bitset Overlap", "Experimental: use bitset-based overlap counting in layout energy (keeps HashSet fallback).");
         }
     }
 

@@ -44,6 +44,8 @@ public class GraphMapBuilder : MonoBehaviour
     public int maxConfigSpaceSizePairs = 12;
     [Tooltip("Log layout generator micro-profiling summary (calls + time breakdown).")]
     public bool logLayoutProfiling = false;
+    [Tooltip("Experimental: use bitset-based overlap counting in layout energy (keeps HashSet fallback).")]
+    public bool useBitsetOverlap = false;
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -90,6 +92,7 @@ public class GraphMapBuilder : MonoBehaviour
             LogConfigSpaceSizeSummary = logConfigSpaceSizeSummary,
             MaxConfigSpaceSizePairs = maxConfigSpaceSizePairs,
             LogLayoutProfiling = logLayoutProfiling,
+            UseBitsetOverlap = useBitsetOverlap,
             DebugNoLayouts = debugNoLayouts,
             DebugNoLayoutsTopPairs = debugNoLayoutsTopPairs,
             DebugNoLayoutsTopEdges = debugNoLayoutsTopEdges

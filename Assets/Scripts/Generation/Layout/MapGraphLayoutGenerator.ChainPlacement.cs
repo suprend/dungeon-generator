@@ -11,6 +11,7 @@ public sealed partial class MapGraphLayoutGenerator
         using var _ps = PS(S_AddChain);
         if (profiling != null)
             profiling.AddChainCalls++;
+        var deepProfile = settings != null && settings.LogLayoutProfiling;
 
         var generated = new List<LayoutState>();
         if (chain == null || chain.Nodes == null || chain.Nodes.Count == 0)
@@ -23,7 +24,11 @@ public sealed partial class MapGraphLayoutGenerator
             return AddChainSmall(baseState, chain, maxLayouts);
 
         var initStart = profiling != null ? NowTicks() : 0;
-        var current = GetInitialLayout(baseState, chain);
+        LayoutState current;
+        using (PSIf(deepProfile, S_AddChain_InitLayout))
+        {
+            current = GetInitialLayout(baseState, chain);
+        }
         if (profiling != null)
             profiling.GetInitialLayoutTicks += NowTicks() - initStart;
         if (current == null)
@@ -35,11 +40,15 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         var rooms = current.Rooms;
-        var energyCache = current.EnergyCache ?? BuildEnergyCache(rooms);
+        EnergyCache energyCache;
+        using (PSIf(deepProfile, S_AddChain_BuildEnergyCache))
+        {
+            energyCache = current.EnergyCache ?? BuildEnergyCache(rooms);
+        }
         float temperature = EstimateInitialTemperature(chain, rooms);
 
         var bestEnergy = energyCache.TotalEnergy;
-        var bestRoomsSnapshot = settings.DebugNoLayouts ? new Dictionary<string, RoomPlacement>(rooms) : null;
+        var bestRoomsSnapshot = settings.DebugNoLayouts ? CloneRoomsDeep(rooms) : null;
 
         var chainNodeIndices = new List<int>(chain.Nodes.Count);
         for (var i = 0; i < chain.Nodes.Count; i++)
@@ -64,56 +73,68 @@ public sealed partial class MapGraphLayoutGenerator
         var wiggleCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxWiggleCandidates));
 
         var saStart = profiling != null ? NowTicks() : 0;
-        for (int t = 0; t < Mathf.Max(1, settings.TemperatureSteps); t++)
+        using (PSIf(deepProfile, S_AddChain_SA))
         {
-            for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
+            for (int t = 0; t < Mathf.Max(1, settings.TemperatureSteps); t++)
             {
-                var currentEnergy = energyCache.TotalEnergy;
-                pairChanges.Clear();
-                edgeChanges.Clear();
-                if (!TryPerturbInPlace(rooms, energyCache, movableNodeIndices, positionCandidates, wiggleCandidates, pairChanges, edgeChanges, out var undo))
-                    continue;
-
-                var perturbedEnergy = energyCache.TotalEnergy;
-                var delta = perturbedEnergy - currentEnergy;
-
-                // Expensive O(n^2) validation is only paid when energy says we're at a “complete” solution
-                // (no illegal overlaps + all currently-placed edges touch).
-                if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain) && IsValidLayout(rooms))
+                for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
                 {
-                    var snapshotRooms = new Dictionary<string, RoomPlacement>(rooms);
-                    var snapshotCache = BuildEnergyCache(snapshotRooms);
-                    var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
-                    generated.Add(snapshot);
-                    if (profiling != null)
-                        profiling.CandidateLayoutsAccepted++;
-                    if (generated.Count >= maxLayouts)
+                    var currentEnergy = energyCache.TotalEnergy;
+                    pairChanges.Clear();
+                    edgeChanges.Clear();
+                    if (!TryPerturbInPlace(rooms, energyCache, movableNodeIndices, positionCandidates, wiggleCandidates, pairChanges, edgeChanges, out var undo))
+                        continue;
+
+                    var perturbedEnergy = energyCache.TotalEnergy;
+                    var delta = perturbedEnergy - currentEnergy;
+
+                    // Expensive O(n^2) validation is only paid when energy says we're at a “complete” solution
+                    // (no illegal overlaps + all currently-placed edges touch).
+                    using (PSIf(deepProfile, S_AddChain_OutputCheck))
                     {
-                        if (profiling != null)
-                            profiling.SaLoopTicks += NowTicks() - saStart;
-                        return generated;
+                        if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain) && IsValidLayout(rooms))
+                        {
+                            using (PSIf(deepProfile, S_AddChain_Snapshot))
+                            {
+                                var snapshotRooms = CloneRoomsDeep(rooms);
+                                var snapshotCache = BuildEnergyCache(snapshotRooms);
+                                var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
+                                generated.Add(snapshot);
+                            }
+                            if (profiling != null)
+                                profiling.CandidateLayoutsAccepted++;
+                            if (generated.Count >= maxLayouts)
+                            {
+                                if (profiling != null)
+                                    profiling.SaLoopTicks += NowTicks() - saStart;
+                                return generated;
+                            }
+                        }
+                    }
+
+                    if (delta < 0f)
+                        continue;
+
+                    using (PSIf(deepProfile, S_AddChain_AcceptReject))
+                    {
+                        var p = Mathf.Exp(-delta / Mathf.Max(0.0001f, temperature));
+                        if (rng.NextDouble() >= p)
+                            UndoMove(rooms, energyCache, undo, pairChanges, edgeChanges);
+                    }
+
+                    if (settings.DebugNoLayouts)
+                    {
+                        var eNow = energyCache.TotalEnergy;
+                        if (eNow < bestEnergy)
+                        {
+                            bestEnergy = eNow;
+                            bestRoomsSnapshot = CloneRoomsDeep(rooms);
+                        }
                     }
                 }
 
-                if (delta < 0f)
-                    continue;
-
-                var p = Mathf.Exp(-delta / Mathf.Max(0.0001f, temperature));
-                if (rng.NextDouble() >= p)
-                    UndoMove(rooms, energyCache, undo, pairChanges, edgeChanges);
-
-                if (settings.DebugNoLayouts)
-                {
-                    var eNow = energyCache.TotalEnergy;
-                    if (eNow < bestEnergy)
-                    {
-                        bestEnergy = eNow;
-                        bestRoomsSnapshot = new Dictionary<string, RoomPlacement>(rooms);
-                    }
-                }
+                temperature *= Mathf.Clamp(settings.Cooling, 0.01f, 0.999f);
             }
-
-            temperature *= Mathf.Clamp(settings.Cooling, 0.01f, 0.999f);
         }
 
         if (profiling != null)
@@ -157,7 +178,9 @@ public sealed partial class MapGraphLayoutGenerator
                 prefabs.Shuffle(rng);
                 var singlePositionCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxFallbackCandidates));
 
-                RoomPlacement bestPlacement = null;
+                GameObject bestPrefab = null;
+                ModuleShape bestShape = null;
+                Vector2Int bestRoot = default;
                 float bestEnergy = float.MaxValue;
                 for (var prefabIndex = 0; prefabIndex < prefabs.Count; prefabIndex++)
                 {
@@ -171,19 +194,21 @@ public sealed partial class MapGraphLayoutGenerator
                     for (var i = 0; i < singlePositionCandidates.Count; i++)
                     {
                         var pos = singlePositionCandidates[i];
-                        var candidate = new RoomPlacement(node.id, prefab, shape, pos);
-                        var e = ComputeEnergyIfAdded(rooms, cache, candidate);
+                        var e = ComputeEnergyIfAddedAt(node.id, prefab, shape, pos, cache);
                         if (e < bestEnergy)
                         {
                             bestEnergy = e;
-                            bestPlacement = candidate;
+                            bestPrefab = prefab;
+                            bestShape = shape;
+                            bestRoot = pos;
                         }
                     }
                 }
 
-                if (bestPlacement == null)
+                if (bestPrefab == null || bestShape == null)
                     return generated;
 
+                var bestPlacement = new RoomPlacement(node.id, bestPrefab, bestShape, bestRoot);
                 AddPlacementToEnergyCacheInPlace(rooms, cache, bestPlacement);
                 rooms[node.id] = bestPlacement;
             }
@@ -306,50 +331,106 @@ public sealed partial class MapGraphLayoutGenerator
 
     private LayoutState GetInitialLayout(LayoutState baseState, MapGraphChainBuilder.Chain chain)
     {
-        var rooms = new Dictionary<string, RoomPlacement>(baseState.Rooms);
-        var cache = baseState.EnergyCache != null ? CloneEnergyCache(baseState.EnergyCache) : BuildEnergyCache(rooms);
-        var order = BuildChainBfsOrder(chain, rooms);
-        var positionCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxFallbackCandidates));
-        foreach (var node in order)
+        var deepProfile = settings != null && settings.LogLayoutProfiling;
+
+        Dictionary<string, RoomPlacement> rooms;
+        using (PSIf(deepProfile, S_InitLayout_CloneRooms))
         {
-            if (node == null || string.IsNullOrEmpty(node.id))
-                continue;
-            if (rooms.ContainsKey(node.id))
-                continue;
+            // SA mutates placements in-place; deep clone to avoid affecting other LayoutState instances.
+            rooms = CloneRoomsDeep(baseState.Rooms);
+        }
 
-            var prefabs = GetRoomPrefabs(node);
-            prefabs.Shuffle(rng);
+        EnergyCache cache;
+        using (PSIf(deepProfile, S_InitLayout_CloneCache))
+        {
+            cache = baseState.EnergyCache != null ? CloneEnergyCache(baseState.EnergyCache) : BuildEnergyCache(rooms);
+        }
 
-            RoomPlacement bestPlacement = null;
-            float bestEnergy = float.MaxValue;
-            foreach (var prefab in prefabs)
+        List<MapGraphAsset.NodeData> order;
+        using (PSIf(deepProfile, S_InitLayout_BuildOrder))
+        {
+            order = BuildChainBfsOrder(chain, rooms);
+        }
+        var positionCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxFallbackCandidates));
+        using (PSIf(deepProfile, S_InitLayout_NodeLoop))
+        {
+            foreach (var node in order)
             {
-                if (!shapeLibrary.TryGetShape(prefab, out var shape, out _))
+                if (node == null || string.IsNullOrEmpty(node.id))
                     continue;
-                FindPositionCandidates(node.id, prefab, shape, rooms, positionCandidates);
-                for (var i = 0; i < positionCandidates.Count; i++)
+                if (rooms.ContainsKey(node.id))
+                    continue;
+
+                List<GameObject> prefabs;
+                using (PSIf(deepProfile, S_InitLayout_GetPrefabs))
                 {
-                    var pos = positionCandidates[i];
-                    var placement = new RoomPlacement(node.id, prefab, shape, pos);
-                    var energy = ComputeEnergyIfAdded(rooms, cache, placement);
-                    if (energy < bestEnergy)
+                    prefabs = GetRoomPrefabs(node);
+                }
+                using (PSIf(deepProfile, S_InitLayout_Shuffle))
+                {
+                    prefabs.Shuffle(rng);
+                }
+
+                GameObject bestPrefab = null;
+                ModuleShape bestShape = null;
+                Vector2Int bestRoot = default;
+                float bestEnergy = float.MaxValue;
+                if (profiling != null)
+                    profiling.InitLayoutNodesScored++;
+                for (var prefabIndex = 0; prefabIndex < prefabs.Count; prefabIndex++)
+                {
+                    var prefab = prefabs[prefabIndex];
+                    if (prefab == null)
+                        continue;
+
+                    ModuleShape shape;
+                    using (PSIf(deepProfile, S_InitLayout_TryGetShape))
                     {
-                        bestEnergy = energy;
-                        bestPlacement = placement;
+                        if (!shapeLibrary.TryGetShape(prefab, out shape, out _))
+                            continue;
+                    }
+
+                    using (PSIf(deepProfile, S_InitLayout_FindCandidates))
+                    {
+                        FindPositionCandidates(node.id, prefab, shape, rooms, positionCandidates);
+                    }
+                    if (profiling != null)
+                        profiling.InitLayoutCandidatesGenerated += positionCandidates.Count;
+
+                    using (PSIf(deepProfile, S_InitLayout_ScoreCandidates))
+                    {
+                        for (var i = 0; i < positionCandidates.Count; i++)
+                        {
+                            if (profiling != null)
+                                profiling.InitLayoutCandidatesScored++;
+                            var pos = positionCandidates[i];
+                            var energy = ComputeEnergyIfAddedAt(node.id, prefab, shape, pos, cache);
+                            if (energy < bestEnergy)
+                            {
+                                bestEnergy = energy;
+                                bestPrefab = prefab;
+                                bestShape = shape;
+                                bestRoot = pos;
+                            }
+                        }
                     }
                 }
-            }
 
-            if (bestPlacement == null)
-            {
-                var chainIds = string.Join(",", chain.Nodes.Select(n => n?.id));
-                lastFailureDetail = $"No candidates for node {node.id} in chain [{chainIds}]";
-                Debug.LogWarning($"[LayoutGenerator] {lastFailureDetail}");
-                return null;
-            }
+                if (bestPrefab == null || bestShape == null)
+                {
+                    var chainIds = string.Join(",", chain.Nodes.Select(n => n?.id));
+                    lastFailureDetail = $"No candidates for node {node.id} in chain [{chainIds}]";
+                    Debug.LogWarning($"[LayoutGenerator] {lastFailureDetail}");
+                    return null;
+                }
 
-            AddPlacementToEnergyCacheInPlace(rooms, cache, bestPlacement);
-            rooms[node.id] = bestPlacement;
+                using (PSIf(deepProfile, S_InitLayout_AddPlacement))
+                {
+                    var bestPlacement = new RoomPlacement(node.id, bestPrefab, bestShape, bestRoot);
+                    AddPlacementToEnergyCacheInPlace(rooms, cache, bestPlacement);
+                    rooms[node.id] = bestPlacement;
+                }
+            }
         }
 
         return new LayoutState(rooms, baseState.ChainIndex, cache);

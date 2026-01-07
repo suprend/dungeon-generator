@@ -95,6 +95,8 @@ public sealed partial class MapGraphLayoutGenerator
             error = "No room prefabs available for layout generation.";
             return false;
         }
+        var nodeByIdLocal = BuildNodeById(graphAsset);
+        var prefabsByRoomTypeLocal = BuildPrefabsByRoomType(graphAsset);
 
         // Connector prefab set.
         var connectorPrefabsLocal = new HashSet<GameObject>();
@@ -241,6 +243,13 @@ public sealed partial class MapGraphLayoutGenerator
         if (profiling != null)
             profiling.WarmupConfigSpacesTicks += NowTicks() - warmupCsStart;
 
+        // Warmup bite-offset caches for (connectorShape, roomShape) pairs used by bite allowance.
+        // This ensures TryFindBiteDepth never builds caches inside IntersectionPenalty hot loops.
+        using (PS(S_WarmupBiteOffsets))
+        {
+            WarmupBiteOffsetMaps(shapeLib, connectorPrefabsLocal, prefabList);
+        }
+
         if (settings.LogConfigSpaceSizeSummary && csPairs > 0)
         {
             var avg = csSum / (float)csPairs;
@@ -257,6 +266,8 @@ public sealed partial class MapGraphLayoutGenerator
             ShapeLibrary = shapeLib,
             ConfigSpaceLibrary = csLib,
             RoomPrefabLookup = roomLookup,
+            NodeById = nodeByIdLocal,
+            PrefabsByRoomType = prefabsByRoomTypeLocal,
             ConnectorPrefabs = connectorPrefabsLocal,
             NeighborLookup = neighborLookupLocal,
             NodeIndexById = nodeIndexById,

@@ -20,6 +20,30 @@ public sealed partial class MapGraphLayoutGenerator
         return true;
     }
 
+    private bool AreGraphNeighbors(string nodeIdA, string nodeIdB)
+    {
+        if (string.IsNullOrEmpty(nodeIdA) || string.IsNullOrEmpty(nodeIdB))
+            return false;
+        if (nodeIndexById == null || neighborIndicesByIndex == null)
+            return false;
+
+        if (!nodeIndexById.TryGetValue(nodeIdA, out var indexA))
+            return false;
+        if (!nodeIndexById.TryGetValue(nodeIdB, out var indexB))
+            return false;
+
+        if (indexA < 0 || indexA >= neighborIndicesByIndex.Length)
+            return false;
+
+        var neighbors = neighborIndicesByIndex[indexA];
+        for (int i = 0; i < neighbors.Length; i++)
+        {
+            if (neighbors[i] == indexB)
+                return true;
+        }
+        return false;
+    }
+
     private float ComputeEnergy(Dictionary<string, RoomPlacement> rooms)
     {
         using var _ps = PS(S_ComputeEnergy);
@@ -235,307 +259,7 @@ public sealed partial class MapGraphLayoutGenerator
         return penalty;
     }
 
-    private sealed class BitGrid
-    {
-        public Vector2Int Min { get; }
-        public int Width { get; }
-        public int Height { get; }
-        public int WordsPerRow { get; }
-        public ulong[] Bits { get; }
-        public ulong LastWordMask { get; }
 
-        private BitGrid(Vector2Int min, int width, int height, int wordsPerRow, ulong[] bits, ulong lastWordMask)
-        {
-            Min = min;
-            Width = width;
-            Height = height;
-            WordsPerRow = wordsPerRow;
-            Bits = bits;
-            LastWordMask = lastWordMask;
-        }
-
-        public static BitGrid Build(HashSet<Vector2Int> cells, Vector2Int min, Vector2Int max)
-        {
-            if (cells == null || cells.Count == 0)
-                return null;
-            var width = max.x - min.x + 1;
-            var height = max.y - min.y + 1;
-            if (width <= 0 || height <= 0)
-                return null;
-
-            var wordsPerRow = (width + 63) >> 6;
-            var bits = new ulong[wordsPerRow * height];
-            var rem = width & 63;
-            var lastMask = rem == 0 ? ulong.MaxValue : ((1UL << rem) - 1UL);
-
-            foreach (var c in cells)
-            {
-                var rx = c.x - min.x;
-                var ry = c.y - min.y;
-                if ((uint)rx >= (uint)width || (uint)ry >= (uint)height)
-                    continue;
-                var word = rx >> 6;
-                var bit = rx & 63;
-                bits[ry * wordsPerRow + word] |= 1UL << bit;
-            }
-
-            if (lastMask != ulong.MaxValue)
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    var idx = y * wordsPerRow + (wordsPerRow - 1);
-                    bits[idx] &= lastMask;
-                }
-            }
-
-            return new BitGrid(min, width, height, wordsPerRow, bits, lastMask);
-        }
-
-        public bool ContainsLocal(Vector2Int localCell)
-        {
-            var rx = localCell.x - Min.x;
-            var ry = localCell.y - Min.y;
-            if ((uint)rx >= (uint)Width || (uint)ry >= (uint)Height)
-                return false;
-            var idx = ry * WordsPerRow + (rx >> 6);
-            return (Bits[idx] & (1UL << (rx & 63))) != 0;
-        }
-
-        public int CountOverlapsShifted(BitGrid moving, Vector2Int shiftMovingToFixed)
-        {
-            if (moving == null || Height == 0 || Width == 0 || moving.Height == 0 || moving.Width == 0)
-                return 0;
-
-            var sx = shiftMovingToFixed.x;
-            var sy = shiftMovingToFixed.y;
-
-            var yStartMoving = Mathf.Max(0, -sy);
-            var yEndMoving = Mathf.Min(moving.Height - 1, Height - 1 - sy);
-            if (yStartMoving > yEndMoving)
-                return 0;
-
-            var fixedWords = WordsPerRow;
-            var movingWords = moving.WordsPerRow;
-            var total = 0;
-
-            if (sx == 0)
-            {
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var n = Mathf.Min(fixedWords, movingWords);
-                    for (int i = 0; i < n; i++)
-                        total += PopCount(Bits[fixedRow + i] & moving.Bits[movingRow + i]);
-                }
-                return total;
-            }
-
-            if (sx > 0)
-            {
-                var wordShift = sx >> 6;
-                var bitShift = sx & 63;
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var iFStart = Mathf.Max(0, wordShift);
-                    var iFEnd = Mathf.Min(fixedWords - 1, wordShift + movingWords - 1);
-                    for (int iF = iFStart; iF <= iFEnd; iF++)
-                    {
-                        var src = iF - wordShift;
-                        var moved = moving.Bits[movingRow + src] << bitShift;
-                        if (bitShift != 0 && src - 1 >= 0)
-                            moved |= moving.Bits[movingRow + (src - 1)] >> (64 - bitShift);
-                        total += PopCount(Bits[fixedRow + iF] & moved);
-                    }
-                }
-                return total;
-            }
-            else
-            {
-                var s = -sx;
-                var wordShift = s >> 6;
-                var bitShift = s & 63;
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var iFEnd = Mathf.Min(fixedWords - 1, movingWords - 1 - wordShift);
-                    for (int iF = 0; iF <= iFEnd; iF++)
-                    {
-                        var src = iF + wordShift;
-                        var moved = moving.Bits[movingRow + src] >> bitShift;
-                        if (bitShift != 0 && src + 1 < movingWords)
-                            moved |= moving.Bits[movingRow + (src + 1)] << (64 - bitShift);
-                        total += PopCount(Bits[fixedRow + iF] & moved);
-                    }
-                }
-                return total;
-            }
-        }
-
-        public int CountIllegalOverlapsShifted(
-            BitGrid moving,
-            Vector2Int shiftMovingToFixed,
-            Vector2Int fixedRoot,
-            AllowedWorldCells allowedWorld,
-            bool earlyStopAtTwo,
-            out Vector2Int lastIllegalWorld)
-        {
-            lastIllegalWorld = default;
-            if (moving == null || Height == 0 || Width == 0 || moving.Height == 0 || moving.Width == 0)
-                return 0;
-
-            var sx = shiftMovingToFixed.x;
-            var sy = shiftMovingToFixed.y;
-
-            var yStartMoving = Mathf.Max(0, -sy);
-            var yEndMoving = Mathf.Min(moving.Height - 1, Height - 1 - sy);
-            if (yStartMoving > yEndMoving)
-                return 0;
-
-            var fixedWords = WordsPerRow;
-            var movingWords = moving.WordsPerRow;
-            var illegal = 0;
-
-            if (sx == 0)
-            {
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var n = Mathf.Min(fixedWords, movingWords);
-                    for (int i = 0; i < n; i++)
-                    {
-                        var overlap = Bits[fixedRow + i] & moving.Bits[movingRow + i];
-                        if (overlap == 0)
-                            continue;
-                        if (!TryAccumulateIllegalBits(overlap, i, yF, fixedRoot, allowedWorld, earlyStopAtTwo, ref illegal, ref lastIllegalWorld))
-                            return illegal;
-                    }
-                }
-                return illegal;
-            }
-
-            if (sx > 0)
-            {
-                var wordShift = sx >> 6;
-                var bitShift = sx & 63;
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var iFStart = Mathf.Max(0, wordShift);
-                    var iFEnd = Mathf.Min(fixedWords - 1, wordShift + movingWords - 1);
-                    for (int iF = iFStart; iF <= iFEnd; iF++)
-                    {
-                        var src = iF - wordShift;
-                        var moved = moving.Bits[movingRow + src] << bitShift;
-                        if (bitShift != 0 && src - 1 >= 0)
-                            moved |= moving.Bits[movingRow + (src - 1)] >> (64 - bitShift);
-                        var overlap = Bits[fixedRow + iF] & moved;
-                        if (overlap == 0)
-                            continue;
-                        if (!TryAccumulateIllegalBits(overlap, iF, yF, fixedRoot, allowedWorld, earlyStopAtTwo, ref illegal, ref lastIllegalWorld))
-                            return illegal;
-                    }
-                }
-                return illegal;
-            }
-            else
-            {
-                var s = -sx;
-                var wordShift = s >> 6;
-                var bitShift = s & 63;
-                for (int yM = yStartMoving; yM <= yEndMoving; yM++)
-                {
-                    var yF = yM + sy;
-                    var fixedRow = yF * fixedWords;
-                    var movingRow = yM * movingWords;
-                    var iFEnd = Mathf.Min(fixedWords - 1, movingWords - 1 - wordShift);
-                    for (int iF = 0; iF <= iFEnd; iF++)
-                    {
-                        var src = iF + wordShift;
-                        var moved = moving.Bits[movingRow + src] >> bitShift;
-                        if (bitShift != 0 && src + 1 < movingWords)
-                            moved |= moving.Bits[movingRow + (src + 1)] << (64 - bitShift);
-                        var overlap = Bits[fixedRow + iF] & moved;
-                        if (overlap == 0)
-                            continue;
-                        if (!TryAccumulateIllegalBits(overlap, iF, yF, fixedRoot, allowedWorld, earlyStopAtTwo, ref illegal, ref lastIllegalWorld))
-                            return illegal;
-                    }
-                }
-                return illegal;
-            }
-        }
-
-        private static int PopCount(ulong x)
-        {
-            // Portable popcount for Unity profiles where System.Numerics.BitOperations is unavailable.
-            x -= (x >> 1) & 0x5555555555555555UL;
-            x = (x & 0x3333333333333333UL) + ((x >> 2) & 0x3333333333333333UL);
-            x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0FUL;
-            return (int)((x * 0x0101010101010101UL) >> 56);
-        }
-
-        private static int TrailingZeroCount(ulong x)
-        {
-            if (x == 0)
-                return 64;
-            // De Bruijn sequence method.
-            var isolated = x & (~x + 1);
-            return DeBruijnIdx[(int)((isolated * 0x03F79D71B4CB0A89UL) >> 58)];
-        }
-
-        private static readonly int[] DeBruijnIdx =
-        {
-            0, 1, 48, 2, 57, 49, 28, 3,
-            61, 58, 50, 42, 38, 29, 17, 4,
-            62, 55, 59, 36, 53, 51, 43, 22,
-            45, 39, 33, 30, 24, 18, 12, 5,
-            63, 47, 56, 27, 60, 41, 37, 16,
-            54, 35, 52, 21, 44, 32, 23, 11,
-            46, 26, 40, 15, 34, 20, 31, 10,
-            25, 14, 19, 9, 13, 8, 7, 6
-        };
-
-        private bool TryAccumulateIllegalBits(
-            ulong overlapWord,
-            int fixedWordIndex,
-            int fixedRowIndex,
-            Vector2Int fixedRoot,
-            AllowedWorldCells allowedWorld,
-            bool earlyStopAtTwo,
-            ref int illegal,
-            ref Vector2Int lastIllegalWorld)
-        {
-            var y = Min.y + fixedRowIndex;
-            var baseX = Min.x + (fixedWordIndex << 6);
-            var w = overlapWord;
-            while (w != 0)
-            {
-                var bit = TrailingZeroCount(w);
-                var x = baseX + bit;
-                var world = fixedRoot + new Vector2Int(x, y);
-                if (allowedWorld.IsEmpty || !allowedWorld.Contains(world))
-                {
-                    illegal++;
-                    lastIllegalWorld = world;
-                    if (earlyStopAtTwo && illegal > 1)
-                        return false;
-                }
-                w &= w - 1;
-            }
-            return true;
-        }
-    }
 
     private sealed class ShapeBitsets
     {
@@ -553,6 +277,7 @@ public sealed partial class MapGraphLayoutGenerator
 
     private static ShapeBitsets GetBitsets(ModuleShape shape)
     {
+        using var _ps = PS(S_GetBitsets);
         if (shape == null)
             return null;
         if (BitsetsByShape.TryGetValue(shape, out var cached))
@@ -682,6 +407,13 @@ public sealed partial class MapGraphLayoutGenerator
 
         if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0)
             return 0f;
+
+        // OPTIMIZATION: Bite allowance only matters for graph neighbors (rooms with doors).
+        // Non-neighbors always get full overlap penalty, no need for expensive bite calculation.
+        if (!AreGraphNeighbors(a.NodeId, b.NodeId))
+        {
+            return floorTotal + aWallTotal + bWallTotal;
+        }
 
         AllowedWorldCells allowedFloor;
         AllowedWorldCells allowedWallA;

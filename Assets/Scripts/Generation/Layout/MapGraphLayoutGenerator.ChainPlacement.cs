@@ -92,22 +92,36 @@ public sealed partial class MapGraphLayoutGenerator
                     // (no illegal overlaps + all currently-placed edges touch).
                     using (PSIf(deepProfile, S_AddChain_OutputCheck))
                     {
-                        if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain) && IsValidLayout(rooms))
+                        if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain))
                         {
-                            using (PSIf(deepProfile, S_AddChain_Snapshot))
+                            if (TryValidateLayout(rooms, out var validationError))
                             {
-                                var snapshotRooms = CloneRoomsDeep(rooms);
-                                var snapshotCache = BuildEnergyCache(snapshotRooms);
-                                var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
-                                generated.Add(snapshot);
-                            }
-                            if (profiling != null)
-                                profiling.CandidateLayoutsAccepted++;
-                            if (generated.Count >= maxLayouts)
-                            {
+                                using (PSIf(deepProfile, S_AddChain_Snapshot))
+                                {
+                                    var snapshotRooms = CloneRoomsDeep(rooms);
+                                    var snapshotCache = BuildEnergyCache(snapshotRooms);
+                                    var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
+                                    generated.Add(snapshot);
+                                }
                                 if (profiling != null)
-                                    profiling.SaLoopTicks += NowTicks() - saStart;
-                                return generated;
+                                    profiling.CandidateLayoutsAccepted++;
+                                if (generated.Count >= maxLayouts)
+                                {
+                                    if (profiling != null)
+                                        profiling.SaLoopTicks += NowTicks() - saStart;
+                                    return generated;
+                                }
+                            }
+                            else
+                            {
+                                if (settings != null && settings.DebugEnergyMismatch)
+                                {
+                                    // DIAGNOSTIC: Why is energy low but layout invalid?
+                                    var freshEnergy = ComputeEnergy(rooms);
+                                    Debug.LogError($"[LayoutGenerator] Energy-Validation Mismatch! CachedEnergy={energyCache.TotalEnergy:F4} FreshEnergy={freshEnergy:F4}. Error: {validationError}");
+
+                                    // Brute-force check removed. Fix applied in GetInitialLayout.
+                                }
                             }
                         }
                     }
@@ -344,6 +358,20 @@ public sealed partial class MapGraphLayoutGenerator
         using (PSIf(deepProfile, S_InitLayout_CloneCache))
         {
             cache = baseState.EnergyCache != null ? CloneEnergyCache(baseState.EnergyCache) : BuildEnergyCache(rooms);
+            // CRITICAL FIX: Rebind cache to the new room objects.
+            // CloneEnergyCache shallow-copies the PlacementsByIndex array, so it points to the OLD instances.
+            // We must update it to point to the NEW instances in 'rooms' so that SA modifications 
+            // are reflected in the 'rooms' dictionary (which is returned in the result).
+            if (baseState.EnergyCache != null && rooms.Count > 0)
+            {
+                foreach (var kv in rooms)
+                {
+                    if (nodeIndexById.TryGetValue(kv.Key, out var idx) && idx >= 0 && idx < cache.NodeCount)
+                    {
+                        cache.PlacementsByIndex[idx] = kv.Value;
+                    }
+                }
+            }
         }
 
         List<MapGraphAsset.NodeData> order;

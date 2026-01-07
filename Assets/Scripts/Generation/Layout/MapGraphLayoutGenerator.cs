@@ -36,6 +36,7 @@ public sealed partial class MapGraphLayoutGenerator
         public float Cooling { get; set; } = 0.65f;
         public float ChangePrefabProbability { get; set; } = 0.35f;
         public int MaxWiggleCandidates { get; set; } = 16;
+        public float WiggleProbability { get; set; } = 0.95f;
         public int MaxFallbackCandidates { get; set; } = 128;
         public bool VerboseConfigSpaceLogs { get; set; } = false;
         public int MaxConfigSpaceLogs { get; set; } = 64;
@@ -44,12 +45,13 @@ public sealed partial class MapGraphLayoutGenerator
         public bool LogLayoutProfiling { get; set; } = false;
 
         // Optional: use bitset-based overlap counting in IntersectionPenaltyFast (keeps HashSet fallback).
-        public bool UseBitsetOverlap { get; set; } = false;
+        public bool UseBitsetOverlap { get; set; } = true;
 
         // When no layouts are produced for a chain, emit diagnostics about the best (lowest-energy) state encountered.
         public bool DebugNoLayouts { get; set; } = false;
         public int DebugNoLayoutsTopPairs { get; set; } = 6;
         public int DebugNoLayoutsTopEdges { get; set; } = 16;
+        public bool DebugEnergyMismatch { get; set; } = true;
     }
 
     public sealed class LayoutResult

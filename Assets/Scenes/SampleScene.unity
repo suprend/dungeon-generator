@@ -229,7 +229,7 @@ Camera:
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 100
+  orthographic size: 40
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -483,7 +483,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57eaa7cb68fb144609efd7942205778f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  graph: {fileID: 11400000, guid: e910749af79764098b9747d8875a1f31, type: 2}
+  graph: {fileID: 11400000, guid: acf5a819284f84ab086aa9ea403036b9, type: 2}
   targetGrid: {fileID: 436320409}
   floorMap: {fileID: 1873774723}
   wallMap: {fileID: 641276130}

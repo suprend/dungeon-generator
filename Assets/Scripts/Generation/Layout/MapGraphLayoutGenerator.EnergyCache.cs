@@ -17,6 +17,8 @@ public sealed partial class MapGraphLayoutGenerator
         public Vector2Int[] FloorMaxW { get; }
         public Vector2Int[] WallMinW { get; }
         public Vector2Int[] WallMaxW { get; }
+        public float[] OverlapByNode { get; }
+        public float[] EdgeByNode { get; }
         public float[] PairPenalty { get; }
         public float[] EdgePenalty { get; }
         public float TotalEnergy => OverlapWeight * OverlapPenaltySum + DistanceWeight * DistancePenaltySum;
@@ -31,6 +33,8 @@ public sealed partial class MapGraphLayoutGenerator
             Vector2Int[] floorMaxW,
             Vector2Int[] wallMinW,
             Vector2Int[] wallMaxW,
+            float[] overlapByNode,
+            float[] edgeByNode,
             float overlapPenaltySum,
             float distancePenaltySum,
             float[] pairPenalty,
@@ -45,6 +49,8 @@ public sealed partial class MapGraphLayoutGenerator
             FloorMaxW = floorMaxW ?? new Vector2Int[NodeCount];
             WallMinW = wallMinW ?? new Vector2Int[NodeCount];
             WallMaxW = wallMaxW ?? new Vector2Int[NodeCount];
+            OverlapByNode = overlapByNode ?? new float[NodeCount];
+            EdgeByNode = edgeByNode ?? new float[NodeCount];
             OverlapPenaltySum = overlapPenaltySum;
             DistancePenaltySum = distancePenaltySum;
             PairPenalty = pairPenalty ?? new float[PairArrayLength(NodeCount)];
@@ -100,7 +106,7 @@ public sealed partial class MapGraphLayoutGenerator
         // - EdgePenalty: distance penalty only for graph-adjacent pairs (when not touching)
         // Both are stored in the same packed-pair indexing.
         if (rooms == null || nodeIdByIndex == null || nodeIndexById == null)
-            return new EnergyCache(0, null, 0, null, null, null, null, null, null, 0f, 0f, null, null);
+            return new EnergyCache(0, null, 0, null, null, null, null, null, null, null, null, 0f, 0f, null, null);
 
         var nodeCount = nodeIdByIndex.Length;
         var placementsByIndex = new RoomPlacement[nodeCount];
@@ -119,6 +125,8 @@ public sealed partial class MapGraphLayoutGenerator
         var floorMaxW = new Vector2Int[nodeCount];
         var wallMinW = new Vector2Int[nodeCount];
         var wallMaxW = new Vector2Int[nodeCount];
+        var overlapByNode = new float[nodeCount];
+        var edgeByNode = new float[nodeCount];
 
         float overlapSum = 0f;
         var pairPenalty = new float[PairArrayLength(nodeCount)];
@@ -150,6 +158,8 @@ public sealed partial class MapGraphLayoutGenerator
                 var idx = PairIndex(i, j, nodeCount);
                 if (idx >= 0)
                     pairPenalty[idx] = p;
+                overlapByNode[i] += p;
+                overlapByNode[j] += p;
                 overlapSum += p;
             }
         }
@@ -181,6 +191,8 @@ public sealed partial class MapGraphLayoutGenerator
                     var idx = PairIndex(i, j, nodeCount);
                     if (idx >= 0)
                         edgePenalty[idx] = p;
+                    edgeByNode[i] += p;
+                    edgeByNode[j] += p;
                     distSum += p;
                 }
             }
@@ -196,6 +208,8 @@ public sealed partial class MapGraphLayoutGenerator
             floorMaxW,
             wallMinW,
             wallMaxW,
+            overlapByNode,
+            edgeByNode,
             overlapSum,
             distSum,
             pairPenalty,
@@ -205,7 +219,7 @@ public sealed partial class MapGraphLayoutGenerator
     private EnergyCache CloneEnergyCache(EnergyCache src)
     {
         if (src == null)
-            return new EnergyCache(0, null, 0, null, null, null, null, null, null, 0f, 0f, null, null);
+            return new EnergyCache(0, null, 0, null, null, null, null, null, null, null, null, 0f, 0f, null, null);
 
         return new EnergyCache(
             src.NodeCount,
@@ -217,6 +231,8 @@ public sealed partial class MapGraphLayoutGenerator
             src.FloorMaxW != null ? (Vector2Int[])src.FloorMaxW.Clone() : new Vector2Int[src.NodeCount],
             src.WallMinW != null ? (Vector2Int[])src.WallMinW.Clone() : new Vector2Int[src.NodeCount],
             src.WallMaxW != null ? (Vector2Int[])src.WallMaxW.Clone() : new Vector2Int[src.NodeCount],
+            src.OverlapByNode != null ? (float[])src.OverlapByNode.Clone() : new float[src.NodeCount],
+            src.EdgeByNode != null ? (float[])src.EdgeByNode.Clone() : new float[src.NodeCount],
             src.OverlapPenaltySum,
             src.DistancePenaltySum,
             src.PairPenalty != null ? (float[])src.PairPenalty.Clone() : new float[PairArrayLength(src.NodeCount)],
@@ -374,10 +390,15 @@ public sealed partial class MapGraphLayoutGenerator
             if (pIdx < 0)
                 continue;
             var oldP = cache.PairPenalty[pIdx];
-            overlapSum -= oldP;
             var p = IntersectionPenalty(added, other);
             cache.PairPenalty[pIdx] = p;
-            overlapSum += p;
+            var dP = p - oldP;
+            overlapSum += dP;
+            if (cache.OverlapByNode != null && cache.OverlapByNode.Length == cache.NodeCount)
+            {
+                cache.OverlapByNode[addedIndex] += dP;
+                cache.OverlapByNode[i] += dP;
+            }
         }
 
         if (neighborIndicesByIndex != null && addedIndex < neighborIndicesByIndex.Length)
@@ -395,10 +416,15 @@ public sealed partial class MapGraphLayoutGenerator
                 if (eIdx < 0)
                     continue;
                 var oldD = cache.EdgePenalty[eIdx];
-                distSum -= oldD;
                 var d = ComputeEdgeDistancePenalty(added, other);
                 cache.EdgePenalty[eIdx] = d;
-                distSum += d;
+                var dD = d - oldD;
+                distSum += dD;
+                if (cache.EdgeByNode != null && cache.EdgeByNode.Length == cache.NodeCount)
+                {
+                    cache.EdgeByNode[addedIndex] += dD;
+                    cache.EdgeByNode[j] += dD;
+                }
             }
         }
 

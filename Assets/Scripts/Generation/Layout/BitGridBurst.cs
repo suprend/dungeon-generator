@@ -284,6 +284,111 @@ public static unsafe class BitGridBurst
         }
     }
 
+    /// <summary>
+    /// Capped version of CountOverlapsShifted. Returns exact overlap count while it is <= cap,
+    /// otherwise returns cap+1 to indicate "exceeded".
+    /// </summary>
+    [BurstCompile]
+    public static int CountOverlapsShiftedCapped(
+        ulong* fixedBits, int fixedWords, int fixedH,
+        ulong* movingBits, int movingWords, int movingH,
+        int sx, int sy,
+        int cap)
+    {
+        if (cap == int.MaxValue)
+            return CountOverlapsShifted(fixedBits, fixedWords, fixedH, movingBits, movingWords, movingH, sx, sy);
+        if (cap < 0)
+            cap = 0;
+
+        var yStartMoving = math.max(0, -sy);
+        var yEndMoving = math.min(movingH - 1, fixedH - 1 - sy);
+        if (yStartMoving > yEndMoving)
+            return 0;
+
+        var total = 0;
+
+        if (sx == 0)
+        {
+            for (int yM = yStartMoving; yM <= yEndMoving; yM++)
+            {
+                var yF = yM + sy;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
+                var n = math.min(fixedWords, movingWords);
+
+                for (int i = 0; i < n; i++)
+                {
+                    var overlap = fixedBits[fixedRow + i] & movingBits[movingRow + i];
+                    total += math.countbits(overlap);
+                    if (total > cap)
+                        return cap + 1;
+                }
+            }
+            return total;
+        }
+
+        if (sx > 0)
+        {
+            var wordShift = sx >> 6;
+            var bitShift = sx & 63;
+            var invBitShift = 64 - bitShift;
+
+            for (int yM = yStartMoving; yM <= yEndMoving; yM++)
+            {
+                var yF = yM + sy;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
+
+                var iFStart = math.max(0, wordShift);
+                var iFEnd = math.min(fixedWords - 1, wordShift + movingWords - 1);
+
+                for (int iF = iFStart; iF <= iFEnd; iF++)
+                {
+                    var src = iF - wordShift;
+                    var moved = movingBits[movingRow + src] << bitShift;
+                    if (bitShift != 0 && src - 1 >= 0)
+                        moved |= movingBits[movingRow + (src - 1)] >> invBitShift;
+
+                    var overlap = fixedBits[fixedRow + iF] & moved;
+                    total += math.countbits(overlap);
+                    if (total > cap)
+                        return cap + 1;
+                }
+            }
+            return total;
+        }
+        else
+        {
+            var s = -sx;
+            var wordShift = s >> 6;
+            var bitShift = s & 63;
+            var invBitShift = 64 - bitShift;
+
+            for (int yM = yStartMoving; yM <= yEndMoving; yM++)
+            {
+                var yF = yM + sy;
+                long fixedRow = (long)yF * fixedWords;
+                long movingRow = (long)yM * movingWords;
+
+                var iFEnd = math.min(fixedWords - 1, movingWords - 1 - wordShift);
+
+                for (int iF = 0; iF <= iFEnd; iF++)
+                {
+                    var src = iF + wordShift;
+                    var moved = movingBits[movingRow + src] >> bitShift;
+                    if (bitShift != 0 && src + 1 < movingWords)
+                        moved |= movingBits[movingRow + (src + 1)] << invBitShift;
+
+                    var overlap = fixedBits[fixedRow + iF] & moved;
+                    total += math.countbits(overlap);
+                    if (total > cap)
+                        return cap + 1;
+                }
+            }
+            return total;
+        }
+    }
+
     [BurstCompile]
     public static int CountIllegalOverlapsShifted(
         ulong* fixedBits, int fixedWords, int fixedH, Vector2Int* fixedMin,

@@ -24,6 +24,8 @@
 
 Каноническое описание алгоритма: `Assets/readme.md`.
 
+Если нужно быстро понять “что считается багом” и какие правила нельзя ломать — начинай с `docs/ai/CONTRACTS.md`.
+
 ## Где живёт код (текущая раскладка)
 
 - Компоненты модулей (префабы): `Assets/Scripts/Modules/`
@@ -53,7 +55,12 @@ Unity‑заметка:
 
 ## Дальше читать
 
+- Контракты/инварианты (must not break): `docs/ai/CONTRACTS.md`
+- Entrypoints (runtime + solver API): `docs/ai/ENTRYPOINTS.md`
+- Логи (что значат ключевые сообщения): `docs/ai/LOGS.md`
+- Repro bundle (что приложить, чтобы ИИ помог): `docs/ai/REPRO.md`
 - Архитектура: `docs/ai/ARCHITECTURE.md`
 - Документация по модулям: `docs/ai/MODULES/`
 - Дебаг: `docs/ai/DEBUGGING.md`
 - Термины: `docs/ai/GLOSSARY.md`
+- Док→код маппинг: `docs/ai/SEMANTIC_AUDIT.md`

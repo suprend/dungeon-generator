@@ -94,7 +94,8 @@ public sealed class ShapeLibrary
     private HashSet<Vector2Int> BuildContactStrip(Vector2Int socketCell, DoorSide side, int width)
     {
         var res = new HashSet<Vector2Int>();
-        // Strict 1-tile bite: only the socket cell itself can overlap.
+        // Contact width is currently fixed to 1 cell.
+        // Bite depth (0..BiteDepth-1) and carve rays are handled in ConfigurationSpaceLibrary/layout/placement.
         res.Add(socketCell);
         return res;
     }

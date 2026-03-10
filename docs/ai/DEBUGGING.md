@@ -73,3 +73,5 @@
 - строку таймингов
 - первые `[ConfigSpace]` / `[LayoutGenerator]` warnings
 - 1–2 скрина префабов (room + connector) с сокетами и floor/wall Tilemap
+
+См. шаблон: `docs/ai/REPRO.md` и пояснения по логам: `docs/ai/LOGS.md`.

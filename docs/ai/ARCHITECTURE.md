@@ -2,9 +2,21 @@
 
 Документ описывает **реальный пайплайн в коде** и зависимости между модулями.
 
+См. контракт (инварианты): `docs/ai/CONTRACTS.md`.
+
 ## Пайплайн (high level)
 
 Сквозной поток генерации:
+
+```mermaid
+flowchart LR
+  A["MapGraphAsset\n(вход)"] --> B["Graph expansion\n(edge-rooms)"]
+  B --> C["Geometry\n(ModuleShape + CS)"]
+  C --> D["Graph decomposition\n(faces/chains)"]
+  D --> E["Layout\n(SA)"]
+  E --> F["Placement\n(carve + occupancy)"]
+  F --> G["Stamping\n(Tilemap)"]
+```
 
 1) Входной граф (`MapGraphAsset`)
 2) Расширение графа в edge‑rooms (`BuildCorridorGraph`)

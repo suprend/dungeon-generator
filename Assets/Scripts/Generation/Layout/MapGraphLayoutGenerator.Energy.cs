@@ -345,6 +345,11 @@ public sealed partial class MapGraphLayoutGenerator
         if (a?.Shape == null || b?.Shape == null)
             return 0f;
 
+        var useCap = annealingActive && settings != null && settings.OverlapPenaltyCap > 0;
+        var cap = useCap ? settings.OverlapPenaltyCap : 0;
+        var slack = useCap ? Mathf.Max(0, settings.OverlapPenaltyCapSlack) : 0;
+        var rawCap = useCap ? cap + slack : int.MaxValue;
+
         var aFloorMinW = a.Shape.Min + a.Root;
         var aFloorMaxW = a.Shape.Max + a.Root;
         var bFloorMinW = b.Shape.Min + b.Root;
@@ -385,7 +390,20 @@ public sealed partial class MapGraphLayoutGenerator
         {
             using var _psFloor = PSIf(deepProfile, S_IntersectionPenalty_Bitset_FloorFloor);
             var shift = (bFloor.Min + deltaBA) - aFloor.Min;
-            floorTotal = aFloor.CountOverlapsShifted(bFloor, shift);
+            if (useCap)
+            {
+                var remaining = rawCap - (floorTotal + aWallTotal + bWallTotal);
+                if (remaining <= 0)
+                    return cap;
+                var c = aFloor.CountOverlapsShiftedCapped(bFloor, shift, remaining);
+                if (c > remaining)
+                    return cap;
+                floorTotal = c;
+            }
+            else
+            {
+                floorTotal = aFloor.CountOverlapsShifted(bFloor, shift);
+            }
         }
 
         // aWalls vs bFloors.
@@ -393,7 +411,20 @@ public sealed partial class MapGraphLayoutGenerator
         {
             using var _psWallA = PSIf(deepProfile, S_IntersectionPenalty_Bitset_AWall_BFloor);
             var shift = (bFloor.Min + deltaBA) - aWall.Min;
-            aWallTotal = aWall.CountOverlapsShifted(bFloor, shift);
+            if (useCap)
+            {
+                var remaining = rawCap - (floorTotal + aWallTotal + bWallTotal);
+                if (remaining <= 0)
+                    return cap;
+                var c = aWall.CountOverlapsShiftedCapped(bFloor, shift, remaining);
+                if (c > remaining)
+                    return cap;
+                aWallTotal = c;
+            }
+            else
+            {
+                aWallTotal = aWall.CountOverlapsShifted(bFloor, shift);
+            }
         }
 
         // bWalls vs aFloors.
@@ -402,7 +433,20 @@ public sealed partial class MapGraphLayoutGenerator
             using var _psWallB = PSIf(deepProfile, S_IntersectionPenalty_Bitset_BWall_AFloor);
             var deltaAB = a.Root - b.Root;
             var shift = (aFloor.Min + deltaAB) - bWall.Min;
-            bWallTotal = bWall.CountOverlapsShifted(aFloor, shift);
+            if (useCap)
+            {
+                var remaining = rawCap - (floorTotal + aWallTotal + bWallTotal);
+                if (remaining <= 0)
+                    return cap;
+                var c = bWall.CountOverlapsShiftedCapped(aFloor, shift, remaining);
+                if (c > remaining)
+                    return cap;
+                bWallTotal = c;
+            }
+            else
+            {
+                bWallTotal = bWall.CountOverlapsShifted(aFloor, shift);
+            }
         }
 
         if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0)
@@ -412,7 +456,8 @@ public sealed partial class MapGraphLayoutGenerator
         // Non-neighbors always get full overlap penalty, no need for expensive bite calculation.
         if (!AreGraphNeighbors(a.NodeId, b.NodeId))
         {
-            return floorTotal + aWallTotal + bWallTotal;
+            var raw = floorTotal + aWallTotal + bWallTotal;
+            return useCap ? Mathf.Min(cap, raw) : raw;
         }
 
         AllowedWorldCells allowedFloor;
@@ -435,6 +480,8 @@ public sealed partial class MapGraphLayoutGenerator
                     allowed = CountAllowedOverlapCells(aFloor, a.Root, bFloor, b.Root, allowedFloor);
             }
             penalty += Mathf.Max(0, floorTotal - allowed);
+            if (useCap && penalty >= cap)
+                return cap;
         }
 
         if (aWallTotal > 0)
@@ -446,6 +493,8 @@ public sealed partial class MapGraphLayoutGenerator
                     allowed = CountAllowedOverlapCells(aWall, a.Root, bFloor, b.Root, allowedWallA);
             }
             penalty += Mathf.Max(0, aWallTotal - allowed);
+            if (useCap && penalty >= cap)
+                return cap;
         }
 
         if (bWallTotal > 0)
@@ -457,8 +506,12 @@ public sealed partial class MapGraphLayoutGenerator
                     allowed = CountAllowedOverlapCells(bWall, b.Root, aFloor, a.Root, allowedWallB);
             }
             penalty += Mathf.Max(0, bWallTotal - allowed);
+            if (useCap && penalty >= cap)
+                return cap;
         }
 
+        if (useCap)
+            return Mathf.Min(cap, penalty);
         return penalty;
     }
 

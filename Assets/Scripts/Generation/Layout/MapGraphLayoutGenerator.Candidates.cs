@@ -130,7 +130,7 @@ public sealed partial class MapGraphLayoutGenerator
                 scratchGrid.AndShifted(next.space.Grid, shift);
             }
 
-            // Extract bit positions - managed loop with pre-capacity
+            // Extract bit positions - managed loop
             int wordsPerRow = scratchGrid.WordsPerRow;
             ulong[] bits = scratchGrid.Bits;
             int h = scratchGrid.Height;
@@ -138,8 +138,10 @@ public sealed partial class MapGraphLayoutGenerator
             int minY = scratchGrid.Min.y;
 
             candidatesScratch.Clear();
-            long totalCells = (long)scratchGrid.Width * scratchGrid.Height;
-            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, (int)Mathf.Clamp(totalCells, 0, 10_000_000));
+            // Upper bound for the intersection is the smallest neighbor space we picked as the base.
+            // Avoid pre-allocating by grid area: large sparse grids would cause huge allocations here.
+            if (bestCount > 0 && bestCount != int.MaxValue)
+                candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, bestCount);
 
             for (int r = 0; r < h; r++)
             {
@@ -234,8 +236,19 @@ public sealed partial class MapGraphLayoutGenerator
         using var _ps = PS(S_FindPositionCandidates);
         var start = profiling != null ? NowTicks() : 0;
         result?.Clear();
+        void Finish()
+        {
+            if (profiling != null)
+            {
+                profiling.FindPositionCandidatesCalls++;
+                profiling.FindPositionCandidatesTicks += NowTicks() - start;
+            }
+        }
         if (shape == null || prefab == null || cache == null || neighborIndicesByIndex == null || nodeIndex < 0 || nodeIndex >= neighborIndicesByIndex.Length)
+        {
+            Finish();
             return;
+        }
 
         neighborRootsScratch.Clear();
         var neigh = neighborIndicesByIndex[nodeIndex];
@@ -254,12 +267,16 @@ public sealed partial class MapGraphLayoutGenerator
             neighborRootsScratch.Add((neighbor, space));
         }
 
+        var baseCount = 0;
+        if (allowExistingRoot)
+        {
+            result?.Add(existingRoot);
+            baseCount = result?.Count ?? 0;
+        }
+
         if (neighborRootsScratch.Count == 0)
         {
-            if (allowExistingRoot)
-                result?.Add(existingRoot);
-
-            if (result == null || result.Count == 0)
+            if (result == null || result.Count == baseCount)
             {
                 var anyPlaced = false;
                 for (var i = 0; i < cache.NodeCount; i++)
@@ -279,6 +296,7 @@ public sealed partial class MapGraphLayoutGenerator
                 {
                     var spacing = EstimateUnconstrainedSpacing(shape);
                     var rings = Mathf.Clamp(settings.MaxWiggleCandidates, 4, 64) / 4;
+                    var center = allowExistingRoot ? existingRoot : Vector2Int.zero;
                     for (int r = 0; r <= rings; r++)
                     {
                         for (int dx = -r; dx <= r; dx++)
@@ -287,44 +305,53 @@ public sealed partial class MapGraphLayoutGenerator
                             {
                                 if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r)
                                     continue;
-                                result?.Add(new Vector2Int(dx * spacing, dy * spacing));
-                                if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                                result?.Add(center + new Vector2Int(dx * spacing, dy * spacing));
+                                if (result != null && result.Count - baseCount >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                                     break;
                             }
-                            if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                            if (result != null && result.Count - baseCount >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                                 break;
                         }
-                        if (result != null && result.Count >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
+                        if (result != null && result.Count - baseCount >= Mathf.Max(8, settings.MaxFallbackCandidates / 8))
                             break;
                     }
                 }
             }
+            Finish();
             return;
         }
 
-        // FAST PATH: Single neighbor - use precomputed OffsetsList directly
+        var useSampling = settings != null && settings.UseRejectionSamplingCandidates;
+        var desired = Mathf.Clamp(Mathf.Max(16, settings.MaxWiggleCandidates), 8, 256);
+        if (result != null)
+            baseCount = result.Count;
+
+        // FAST PATH: Single neighbor.
         if (neighborRootsScratch.Count == 1)
         {
             var neighbor = neighborRootsScratch[0].placement;
             var space = neighborRootsScratch[0].space;
             var offsets = space.OffsetsList;
-
-            candidatesScratch.Clear();
-            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, offsets.Count);
-
-            for (int i = 0; i < offsets.Count; i++)
+            if (offsets != null && offsets.Count > 0)
             {
-                candidatesScratch.Add(neighbor.Root + offsets[i]);
+                if (!useSampling || offsets.Count <= desired)
+                {
+                    for (int i = 0; i < offsets.Count; i++)
+                        result?.Add(neighbor.Root + offsets[i]);
+                }
+                else
+                {
+                    for (int i = 0; i < desired; i++)
+                        result?.Add(neighbor.Root + offsets[rng.Next(offsets.Count)]);
+                }
             }
-
-            if (result != null)
-                result.AddRange(candidatesScratch);
-
+            Finish();
             return;
         }
 
-        // SLOW PATH: Multiple neighbors - use BitGrid intersection
-        // Optimized intersection using BitGrid
+        // Multiple neighbors:
+        // - Exact mode: BitGrid intersection + full enumeration.
+        // - Sampling mode: rejection sampling against neighbor spaces (bounded).
         var baseIndex = 0;
         var bestCount = int.MaxValue;
         for (var i = 0; i < neighborRootsScratch.Count; i++)
@@ -339,12 +366,93 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         var baseNeighbor = neighborRootsScratch[baseIndex];
+        var baseRoot = baseNeighbor.placement.Root;
+
+        if (useSampling)
+        {
+            var baseOffsets = baseNeighbor.space?.OffsetsList;
+            if (baseOffsets != null && baseOffsets.Count > 0)
+            {
+                // Keep this bounded: this is called often inside SA. Large rejection loops can be worse than scanning.
+                // Oversample moderately; if acceptance is low we still return a small set quickly.
+                var attempts = Mathf.Min(baseOffsets.Count, Mathf.Clamp(desired * 16 * Mathf.Max(1, neighborRootsScratch.Count), 128, 4096));
+                for (var a = 0; a < attempts && (result == null || (result.Count - baseCount) < desired); a++)
+                {
+                    var candidateRoot = baseRoot + baseOffsets[rng.Next(baseOffsets.Count)];
+                    var ok = true;
+                    for (var i = 0; i < neighborRootsScratch.Count; i++)
+                    {
+                        if (i == baseIndex)
+                            continue;
+                        var n = neighborRootsScratch[i];
+                        var delta = candidateRoot - n.placement.Root;
+                        var g = n.space?.Grid;
+                        if (g != null)
+                        {
+                            if (!g.IsSet(delta))
+                            {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            if (n.space == null || !n.space.Contains(delta))
+                            {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (ok)
+                        result?.Add(candidateRoot);
+                }
+            }
+
+            // If we failed to satisfy all neighbors, fall back to a bounded “satisfy max neighbors” sample.
+            if (result == null || result.Count == baseCount)
+            {
+                scoredScratch.Clear();
+                var perNeighbor = Mathf.Clamp(desired * 8, 64, 2048);
+                foreach (var (neighbor, space) in neighborRootsScratch)
+                {
+                    var offsets = space?.OffsetsList;
+                    if (offsets == null || offsets.Count == 0)
+                        continue;
+                    var take = Mathf.Min(perNeighbor, offsets.Count);
+                    for (var i = 0; i < take; i++)
+                    {
+                        var pos = neighbor.Root + offsets[rng.Next(offsets.Count)];
+                        if (!scoredScratch.TryGetValue(pos, out var count))
+                            count = 0;
+                        scoredScratch[pos] = count + 1;
+                    }
+                }
+
+                var maxSatisfied = 0;
+                foreach (var kv in scoredScratch)
+                    maxSatisfied = Mathf.Max(maxSatisfied, kv.Value);
+
+                candidatesScratch.Clear();
+                foreach (var kv in scoredScratch)
+                {
+                    if (kv.Value == maxSatisfied)
+                        candidatesScratch.Add(kv.Key);
+                }
+                candidatesScratch.Shuffle(rng);
+                for (var i = 0; i < candidatesScratch.Count && i < desired; i++)
+                    result?.Add(candidatesScratch[i]);
+            }
+
+            Finish();
+            return;
+        }
+
         var baseGrid = baseNeighbor.space.Grid;
 
         if (baseGrid != null)
         {
             scratchGrid.CopyFrom(baseGrid);
-            var baseRoot = baseNeighbor.placement.Root;
 
             for (int i = 0; i < neighborRootsScratch.Count; i++)
             {
@@ -368,8 +476,9 @@ public sealed partial class MapGraphLayoutGenerator
             int minY = scratchGrid.Min.y;
 
             candidatesScratch.Clear();
-            long totalCells = (long)scratchGrid.Width * scratchGrid.Height;
-            candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, (int)Mathf.Clamp(totalCells, 0, 10_000_000));
+            // Upper bound for the intersection size is the base space size.
+            if (bestCount > 0 && bestCount != int.MaxValue)
+                candidatesScratch.Capacity = Mathf.Max(candidatesScratch.Capacity, bestCount);
 
             for (int r = 0; r < h; r++)
             {
@@ -399,7 +508,7 @@ public sealed partial class MapGraphLayoutGenerator
         if (result != null)
             result.AddRange(candidatesScratch);
 
-        if (result == null || result.Count == 0)
+        if (result == null || result.Count == baseCount)
         {
             scoredScratch.Clear();
             foreach (var (neighbor, space) in neighborRootsScratch)
@@ -436,11 +545,7 @@ public sealed partial class MapGraphLayoutGenerator
         if ((result == null || result.Count == 0) && allowExistingRoot)
             result?.Add(existingRoot);
 
-        if (profiling != null)
-        {
-            profiling.FindPositionCandidatesCalls++;
-            profiling.FindPositionCandidatesTicks += NowTicks() - start;
-        }
+        Finish();
     }
 
     private int EstimateUnconstrainedSpacing(ModuleShape shape)

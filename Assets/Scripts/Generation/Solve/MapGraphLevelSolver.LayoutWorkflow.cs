@@ -6,6 +6,13 @@ using UnityEngine.Tilemaps;
 
 public partial class MapGraphLevelSolver
 {
+    private static bool IsLayoutDeadlineExceeded(float layoutStartTime, float maxDurationSeconds)
+    {
+        if (maxDurationSeconds <= 0f)
+            return false;
+        return Time.realtimeSinceStartup - layoutStartTime > maxDurationSeconds;
+    }
+
     /// <summary>
     /// Generates a high-level room layout (positions + chosen prefabs) using configuration spaces and simulated annealing.
     /// </summary>
@@ -66,7 +73,7 @@ public partial class MapGraphLevelSolver
         bool destroyPlacedInstances = true,
         MapGraphLayoutGenerator.Settings layoutSettings = null,
         int? maxLayoutsPerChain = null,
-        int layoutAttempts = 1)
+        int layoutRetries = 1)
     {
         error = null;
         if (targetGrid == null || floorMap == null)
@@ -96,9 +103,8 @@ public partial class MapGraphLevelSolver
                 return false;
             var solveSeconds = Time.realtimeSinceStartup - solveStartTime;
 
-            var layoutStartTime = Time.realtimeSinceStartup;
             var baseSeed = randomSeed != 0 ? randomSeed : UnityEngine.Random.Range(int.MinValue, int.MaxValue);
-            var attempts = randomSeed != 0 ? 1 : Mathf.Max(1, layoutAttempts);
+            var attempts = Mathf.Max(1, layoutRetries);
             string lastError = null;
 
             var faceChainStart = Time.realtimeSinceStartup;
@@ -127,21 +133,31 @@ public partial class MapGraphLevelSolver
                 float stampSeconds = 0f;
 
                 var attemptSeed = unchecked(baseSeed + attempt);
-                var layoutGenerator = new MapGraphLayoutGenerator(attemptSeed, layoutSettings);
+                Debug.Log($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} started (seed={attemptSeed}, timeout={maxDurationSeconds:0.###}s).");
+                var attemptLayoutSettings = layoutSettings != null ? layoutSettings.Clone() : new MapGraphLayoutGenerator.Settings();
+                attemptLayoutSettings.LayoutDeadlineRealtime = maxDurationSeconds > 0f ? attemptStart + maxDurationSeconds : 0f;
+
+                var layoutGenerator = new MapGraphLayoutGenerator(attemptSeed, attemptLayoutSettings);
                 var layoutGenStart = Time.realtimeSinceStartup;
                 if (!layoutGenerator.TryGenerate(expandedGraph, stamp, out var layout, out var genError, maxLayoutsPerChain, precomputedChains))
                 {
                     lastError = genError;
-                    if (verboseLogs)
-                        Debug.Log($"[MapGraphLevelSolver] Layout generation attempt {attempt + 1}/{attempts} failed: {genError}");
+                    Debug.LogWarning($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} failed during layout generation: {genError}");
                     continue;
                 }
                 layoutSeconds = Time.realtimeSinceStartup - layoutGenStart;
 
+                if (IsLayoutDeadlineExceeded(attemptStart, maxDurationSeconds))
+                {
+                    lastError = $"Layout time limit exceeded during layout generation ({layoutSeconds:0.000}s).";
+                    Debug.LogWarning($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} exceeded layout budget after {layoutSeconds:0.000}s.");
+                    continue;
+                }
+
                 var ordered = precomputedChains;
                 var rngLocal = new System.Random(attemptSeed);
 
-                var placer = new PlacementState(stamp, rngLocal, verboseLogs, startCell, layoutStartTime, maxDurationSeconds, expandedGraph.Nodes.Count, shapeLibrary, configSpaceLibrary);
+                var placer = new PlacementState(stamp, rngLocal, verboseLogs, startCell, totalStartTime, 0f, expandedGraph.Nodes.Count, shapeLibrary, configSpaceLibrary);
                 if (clearMaps)
                     stamp.ClearMaps();
 
@@ -149,6 +165,7 @@ public partial class MapGraphLevelSolver
                 if (!placer.PlaceFromLayout(layout, ordered, expandedGraph))
                 {
                     lastError = placer.LastError ?? "Failed to place layout.";
+                    Debug.LogWarning($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} failed during placement: {lastError}");
                     if (verboseLogs)
                     {
                         placeSeconds = Time.realtimeSinceStartup - placeStart;
@@ -174,10 +191,15 @@ public partial class MapGraphLevelSolver
                     Debug.Log($"[MapGraphLevelSolver] Layout placement completed in {attemptSeconds:0.000}s.");
                     Debug.Log($"[MapGraphLevelSolver] Timings (s): precompute={precomputeSeconds:0.000} solve={solveSeconds:0.000} layout={layoutSeconds:0.000} faces+chains(shared)={faceChainSeconds:0.000} place={placeSeconds:0.000} stamp={stampSeconds:0.000} total={totalSeconds:0.000}");
                 }
+                else
+                {
+                    var attemptSeconds = Time.realtimeSinceStartup - attemptStart;
+                    Debug.Log($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} succeeded in {attemptSeconds:0.000}s.");
+                }
                 return true;
             }
 
-            error = lastError ?? "Failed to generate/place layout after retries.";
+            error = lastError ?? "Failed to generate/place layout after layout retries.";
             return false;
         }
         finally
@@ -203,7 +225,7 @@ public partial class MapGraphLevelSolver
         bool destroyPlacedInstances = true,
         MapGraphLayoutGenerator.Settings layoutSettings = null,
         int? maxLayoutsPerChain = null,
-        int layoutAttempts = 1)
+        int layoutRetries = 1)
     {
         return TrySolveAndPlaceWithLayout(
             targetGrid,
@@ -218,6 +240,6 @@ public partial class MapGraphLevelSolver
             destroyPlacedInstances,
             layoutSettings,
             maxLayoutsPerChain,
-            layoutAttempts);
+            layoutRetries);
     }
 }

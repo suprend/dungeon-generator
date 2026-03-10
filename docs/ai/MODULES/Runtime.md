@@ -6,6 +6,8 @@
 - `GraphMapBuilder` (MonoBehaviour): запускает solver/layout и штампует результат в Tilemap.
 - `GraphGenRunner` / `GraphTilemapGenerator`: хелперы для экспериментов в сцене.
 
+Подробная раскладка “что именно запускает каждый компонент” (и где лежат solver entrypoints): `docs/ai/ENTRYPOINTS.md`.
+
 ## Частые runtime‑параметры
 
 - random seed (детерминизм)

@@ -4,6 +4,12 @@
 
 Статус: выполнено для текущих `docs/ai/*` и публичных/ключевых инвариантов пайплайна; ниже — “источник истины” по ссылкам на код.
 
+Примечание: номера строк в ссылках на `*.cs` со временем могут “поплыть”; если строка не совпадает, ищи по имени файла/метода рядом.
+
+См. также:
+- контракт (инварианты): `docs/ai/CONTRACTS.md`
+- entrypoints: `docs/ai/ENTRYPOINTS.md`
+
 ## Pipeline (из `docs/ai/ARCHITECTURE.md`)
 
 1) **Входной граф (`MapGraphAsset`)**
@@ -95,4 +101,3 @@
 
 - `DoorSocket.SpanId` сейчас **не ограничивает** выбор “один сокет на span” автоматически (используется как authoring/diagnostics), см. `Assets/Scripts/Modules/DoorSocket.cs:14`.
 - `TileStampService` не уничтожает инстансы (только `DisableRenderers`); уничтожение делает placement workflow.
-

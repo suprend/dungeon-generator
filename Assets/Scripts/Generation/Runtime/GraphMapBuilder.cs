@@ -1,5 +1,6 @@
 // Assets/Scripts/Generation/Runtime/GraphMapBuilder.cs
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 
 /// <summary>
@@ -20,8 +21,9 @@ public class GraphMapBuilder : MonoBehaviour
     public bool clearOnRun = true;
     public int randomSeed = 0; // 0 = random
     public bool verboseLogs = false;
-    [Tooltip("Time limit for placement (seconds). 0 = unlimited")]
-    public float placementTimeLimitSeconds = 5f;
+    [FormerlySerializedAs("placementTimeLimitSeconds")]
+    [Tooltip("Time limit for one layout-generation try (SA/stack search), in seconds. 0 = unlimited.")]
+    public float layoutTimeLimitSeconds = 5f;
     [Tooltip("Destroy placed prefab instances after stamping (keeps only tiles).")]
     public bool destroyPlacedInstances = true;
 
@@ -36,8 +38,9 @@ public class GraphMapBuilder : MonoBehaviour
     public float changePrefabProbability = 0.35f;
     public int maxWiggleCandidates = 16;
     public int maxFallbackCandidates = 256;
-    [Tooltip("How many different random seeds to try if layout generation/placement fails. Used only when randomSeed == 0.")]
-    public int layoutAttempts = 1;
+    [FormerlySerializedAs("layoutAttempts")]
+    [Tooltip("How many different random seeds to try for layout generation. Used only when randomSeed == 0.")]
+    public int layoutRetries = 1;
     [Tooltip("Log configuration space (CS) offsets counts for prefab pairs during layout generation.")]
     public bool logConfigSpaceSizeSummary = false;
     [Tooltip("How many largest CS pairs to include in the summary log.")]
@@ -46,6 +49,19 @@ public class GraphMapBuilder : MonoBehaviour
     public bool logLayoutProfiling = false;
     [Tooltip("Experimental: use bitset-based overlap counting in layout energy (keeps HashSet fallback).")]
     public bool useBitsetOverlap = false;
+    [Tooltip("Performance: in SA, avoid enumerating huge candidate sets by sampling random offsets and checking them against neighbors (rejection sampling).")]
+    public bool useRejectionSamplingCandidates = true;
+    [Tooltip("Performance: in SA energy, cap overlap penalty per pair (0 = exact). Lower is faster but less accurate; strict output validation is unchanged.")]
+    public int overlapPenaltyCap = 0;
+    [Tooltip("Extra headroom when overlapPenaltyCap is enabled: counts are exact up to cap+slack before early-out.")]
+    public int overlapPenaltyCapSlack = 64;
+    [Tooltip("Performance: choose SA perturbation targets by current per-node penalties (tournament selection).")]
+    public bool useConflictDrivenTargetSelection = true;
+    [Tooltip("Tournament size for conflict-driven target selection (2–8). Higher focuses more on worst nodes.")]
+    public int targetSelectionTournamentK = 4;
+    [Range(0f, 1f)]
+    [Tooltip("Chance to ignore conflict-driven selection and pick a random target (exploration).")]
+    public float targetSelectionExplorationProbability = 0.15f;
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -93,6 +109,12 @@ public class GraphMapBuilder : MonoBehaviour
             MaxConfigSpaceSizePairs = maxConfigSpaceSizePairs,
             LogLayoutProfiling = logLayoutProfiling,
             UseBitsetOverlap = useBitsetOverlap,
+            UseRejectionSamplingCandidates = useRejectionSamplingCandidates,
+            OverlapPenaltyCap = overlapPenaltyCap,
+            OverlapPenaltyCapSlack = overlapPenaltyCapSlack,
+            UseConflictDrivenTargetSelection = useConflictDrivenTargetSelection,
+            TargetSelectionTournamentK = targetSelectionTournamentK,
+            TargetSelectionExplorationProbability = targetSelectionExplorationProbability,
             DebugNoLayouts = debugNoLayouts,
             DebugNoLayoutsTopPairs = debugNoLayoutsTopPairs,
             DebugNoLayoutsTopEdges = debugNoLayoutsTopEdges
@@ -107,11 +129,11 @@ public class GraphMapBuilder : MonoBehaviour
                 verboseLogs,
                 startCell,
                 out var error,
-                placementTimeLimitSeconds,
+                layoutTimeLimitSeconds,
                 destroyPlacedInstances,
                 settings,
                 maxLayoutsPerChain,
-                layoutAttempts))
+                layoutRetries))
         {
             Debug.LogError($"[GraphMapBuilder] Generation failed: {error}");
         }

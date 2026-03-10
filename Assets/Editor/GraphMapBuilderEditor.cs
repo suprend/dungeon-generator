@@ -18,6 +18,8 @@ public sealed class GraphMapBuilderEditor : Editor
     private readonly struct LayoutPreset
     {
         public string Name { get; }
+        public float LayoutTimeLimitSeconds { get; }
+        public int LayoutRetries { get; }
         public int MaxLayoutsPerChain { get; }
         public int TemperatureSteps { get; }
         public int InnerIterations { get; }
@@ -25,18 +27,36 @@ public sealed class GraphMapBuilderEditor : Editor
         public float ChangePrefabProbability { get; }
         public int MaxWiggleCandidates { get; }
         public int MaxFallbackCandidates { get; }
+        public bool UseBitsetOverlap { get; }
+        public bool UseRejectionSamplingCandidates { get; }
+        public int OverlapPenaltyCap { get; }
+        public int OverlapPenaltyCapSlack { get; }
+        public bool UseConflictDrivenTargetSelection { get; }
+        public int TargetSelectionTournamentK { get; }
+        public float TargetSelectionExplorationProbability { get; }
 
         public LayoutPreset(
             string name,
+            float layoutTimeLimitSeconds,
+            int layoutRetries,
             int maxLayoutsPerChain,
             int temperatureSteps,
             int innerIterations,
             float cooling,
             float changePrefabProbability,
             int maxWiggleCandidates,
-            int maxFallbackCandidates)
+            int maxFallbackCandidates,
+            bool useBitsetOverlap,
+            bool useRejectionSamplingCandidates,
+            int overlapPenaltyCap,
+            int overlapPenaltyCapSlack,
+            bool useConflictDrivenTargetSelection,
+            int targetSelectionTournamentK,
+            float targetSelectionExplorationProbability)
         {
             Name = name;
+            LayoutTimeLimitSeconds = layoutTimeLimitSeconds;
+            LayoutRetries = layoutRetries;
             MaxLayoutsPerChain = maxLayoutsPerChain;
             TemperatureSteps = temperatureSteps;
             InnerIterations = innerIterations;
@@ -44,6 +64,13 @@ public sealed class GraphMapBuilderEditor : Editor
             ChangePrefabProbability = changePrefabProbability;
             MaxWiggleCandidates = maxWiggleCandidates;
             MaxFallbackCandidates = maxFallbackCandidates;
+            UseBitsetOverlap = useBitsetOverlap;
+            UseRejectionSamplingCandidates = useRejectionSamplingCandidates;
+            OverlapPenaltyCap = overlapPenaltyCap;
+            OverlapPenaltyCapSlack = overlapPenaltyCapSlack;
+            UseConflictDrivenTargetSelection = useConflictDrivenTargetSelection;
+            TargetSelectionTournamentK = targetSelectionTournamentK;
+            TargetSelectionExplorationProbability = targetSelectionExplorationProbability;
         }
     }
 
@@ -117,9 +144,9 @@ public sealed class GraphMapBuilderEditor : Editor
             DrawProp(nameof(GraphMapBuilder.destroyPlacedInstances), "Destroy Placed Instances", "After stamping, destroy instantiated prefabs (keeps only tiles).");
 
             EditorGUILayout.Space(4);
-            DrawProp(nameof(GraphMapBuilder.placementTimeLimitSeconds), "Placement Time Limit (s)", "Time limit for placement/stamping stage. 0 = unlimited.");
+            DrawProp(nameof(GraphMapBuilder.layoutTimeLimitSeconds), "Layout Time Limit (s)", "Time limit for one layout-generation try (SA/stack search). 0 = unlimited.");
             DrawProp(nameof(GraphMapBuilder.randomSeed), "Seed", "0 = random per attempt; non-zero = deterministic.");
-            DrawProp(nameof(GraphMapBuilder.layoutAttempts), "Layout Attempts", "How many different seeds to try when Seed==0.");
+            DrawProp(nameof(GraphMapBuilder.layoutRetries), "Layout Retries", "How many different layout seeds to try.");
             DrawProp(nameof(GraphMapBuilder.verboseLogs), "Verbose Logs", "Extra logs from solver and placement.");
         }
     }
@@ -145,6 +172,19 @@ public sealed class GraphMapBuilderEditor : Editor
 
             EditorGUILayout.Space(4);
             DrawProp(nameof(GraphMapBuilder.useBitsetOverlap), "Use Bitset Overlap", "Experimental: use bitset-based overlap counting in layout energy (keeps HashSet fallback).");
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Performance (SA)", EditorStyles.boldLabel);
+            DrawProp(nameof(GraphMapBuilder.useRejectionSamplingCandidates), "Use Rejection Sampling Candidates", "Avoid enumerating huge candidate sets by sampling random offsets and checking them against neighbors.");
+            DrawProp(nameof(GraphMapBuilder.overlapPenaltyCap), "Overlap Penalty Cap", "Cap overlap penalty per pair during SA energy evaluation (0 = exact). Lower is faster but less accurate; strict output validation is unchanged.");
+            if (serializedObject.FindProperty(nameof(GraphMapBuilder.overlapPenaltyCap))?.intValue > 0)
+                DrawProp(nameof(GraphMapBuilder.overlapPenaltyCapSlack), "Overlap Cap Slack", "Extra headroom when cap is enabled: exact counts up to cap+slack before early-out.");
+            DrawProp(nameof(GraphMapBuilder.useConflictDrivenTargetSelection), "Conflict-Driven Target Selection", "Prefer perturbing nodes that currently contribute most overlap/edge penalties (tournament selection), with some random exploration.");
+            if (GetBool(nameof(GraphMapBuilder.useConflictDrivenTargetSelection)))
+            {
+                DrawProp(nameof(GraphMapBuilder.targetSelectionTournamentK), "Target Tournament K", "How many random nodes to compare per step (2–8). Higher focuses more on worst nodes.");
+                DrawProp(nameof(GraphMapBuilder.targetSelectionExplorationProbability), "Target Exploration Probability", "Chance to ignore the conflict score and pick a random node (helps avoid local minima).");
+            }
         }
     }
 
@@ -153,37 +193,64 @@ public sealed class GraphMapBuilderEditor : Editor
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             EditorGUILayout.LabelField("Presets", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("Applies only SA parameters (does not change Layout Attempts or debug flags).", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Applies SA parameters plus layout timeout/retry count. Does not change debug flags.", EditorStyles.wordWrappedMiniLabel);
 
             var presets = new[]
             {
                 new LayoutPreset(
-                    name: "Fast",
+                    name: "Fast (Stable)",
+                    layoutTimeLimitSeconds: 0.3f,
+                    layoutRetries: 10,
                     maxLayoutsPerChain: 4,
                     temperatureSteps: 12,
                     innerIterations: 48,
                     cooling: 0.60f,
                     changePrefabProbability: 0.15f,
                     maxWiggleCandidates: 12,
-                    maxFallbackCandidates: 96),
+                    maxFallbackCandidates: 96,
+                    useBitsetOverlap: true,
+                    useRejectionSamplingCandidates: true,
+                    overlapPenaltyCap: 0,
+                    overlapPenaltyCapSlack: 64,
+                    useConflictDrivenTargetSelection: true,
+                    targetSelectionTournamentK: 4,
+                    targetSelectionExplorationProbability: 0.15f),
                 new LayoutPreset(
-                    name: "Balanced",
-                    maxLayoutsPerChain: 8,
+                    name: "Fast (Exp)",
+                    layoutTimeLimitSeconds: 0.3f,
+                    layoutRetries: 10,
+                    maxLayoutsPerChain: 4,
+                    temperatureSteps: 10,
+                    innerIterations: 40,
+                    cooling: 0.68f,
+                    changePrefabProbability: 0.10f,
+                    maxWiggleCandidates: 10,
+                    maxFallbackCandidates: 64,
+                    useBitsetOverlap: true,
+                    useRejectionSamplingCandidates: true,
+                    overlapPenaltyCap: 0,
+                    overlapPenaltyCapSlack: 64,
+                    useConflictDrivenTargetSelection: true,
+                    targetSelectionTournamentK: 4,
+                    targetSelectionExplorationProbability: 0.15f),
+                new LayoutPreset(
+                    name: "Slow",
+                    layoutTimeLimitSeconds: 0.5f,
+                    layoutRetries: 3,
+                    maxLayoutsPerChain: 4,
                     temperatureSteps: 24,
                     innerIterations: 128,
-                    cooling: 0.65f,
-                    changePrefabProbability: 0.35f,
-                    maxWiggleCandidates: 16,
-                    maxFallbackCandidates: 256),
-                new LayoutPreset(
-                    name: "Thorough",
-                    maxLayoutsPerChain: 12,
-                    temperatureSteps: 32,
-                    innerIterations: 192,
-                    cooling: 0.70f,
-                    changePrefabProbability: 0.45f,
-                    maxWiggleCandidates: 24,
-                    maxFallbackCandidates: 384),
+                    cooling: 0.8f,
+                    changePrefabProbability: 0.1f,
+                    maxWiggleCandidates: 32,
+                    maxFallbackCandidates: 256,
+                    useBitsetOverlap: true,
+                    useRejectionSamplingCandidates: true,
+                    overlapPenaltyCap: 0,
+                    overlapPenaltyCapSlack: 64,
+                    useConflictDrivenTargetSelection: true,
+                    targetSelectionTournamentK: 4,
+                    targetSelectionExplorationProbability: 0.15f),
             };
 
             using (new EditorGUILayout.HorizontalScope())
@@ -206,6 +273,8 @@ public sealed class GraphMapBuilderEditor : Editor
                 continue;
 
             Undo.RecordObject(builder, $"Apply Layout Preset: {preset.Name}");
+            builder.layoutTimeLimitSeconds = preset.LayoutTimeLimitSeconds;
+            builder.layoutRetries = preset.LayoutRetries;
             builder.maxLayoutsPerChain = preset.MaxLayoutsPerChain;
             builder.temperatureSteps = preset.TemperatureSteps;
             builder.innerIterations = preset.InnerIterations;
@@ -213,6 +282,13 @@ public sealed class GraphMapBuilderEditor : Editor
             builder.changePrefabProbability = preset.ChangePrefabProbability;
             builder.maxWiggleCandidates = preset.MaxWiggleCandidates;
             builder.maxFallbackCandidates = preset.MaxFallbackCandidates;
+            builder.useBitsetOverlap = preset.UseBitsetOverlap;
+            builder.useRejectionSamplingCandidates = preset.UseRejectionSamplingCandidates;
+            builder.overlapPenaltyCap = preset.OverlapPenaltyCap;
+            builder.overlapPenaltyCapSlack = preset.OverlapPenaltyCapSlack;
+            builder.useConflictDrivenTargetSelection = preset.UseConflictDrivenTargetSelection;
+            builder.targetSelectionTournamentK = preset.TargetSelectionTournamentK;
+            builder.targetSelectionExplorationProbability = preset.TargetSelectionExplorationProbability;
             MarkDirty(builder);
         }
     }

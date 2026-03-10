@@ -47,11 +47,64 @@ public sealed partial class MapGraphLayoutGenerator
         // Optional: use bitset-based overlap counting in IntersectionPenaltyFast (keeps HashSet fallback).
         public bool UseBitsetOverlap { get; set; } = true;
 
+        // Performance: avoid enumerating huge candidate sets in SA inner loops by sampling random offsets
+        // and verifying them against neighbor spaces (rejection sampling).
+        public bool UseRejectionSamplingCandidates { get; set; } = true;
+
+        // Performance: cap overlap penalty contribution per pair during SA energy evaluation.
+        // 0 = compute exact overlaps. Lower values are faster but less accurate (strict validation is unchanged).
+        public int OverlapPenaltyCap { get; set; } = 0;
+
+        // Extra headroom used when OverlapPenaltyCap is enabled and we still want exact energy for small overlaps.
+        public int OverlapPenaltyCapSlack { get; set; } = 64;
+
+        // Performance: pick SA perturbation targets preferentially from nodes that currently contribute
+        // most overlap/edge penalty (tournament selection), with some exploration to avoid local minima.
+        public bool UseConflictDrivenTargetSelection { get; set; } = true;
+        public int TargetSelectionTournamentK { get; set; } = 4;
+        public float TargetSelectionExplorationProbability { get; set; } = 0.15f;
+
+        // Internal: absolute realtime deadline for the current layout-generation attempt.
+        // <= 0 means no deadline.
+        public float LayoutDeadlineRealtime { get; set; } = 0f;
+
         // When no layouts are produced for a chain, emit diagnostics about the best (lowest-energy) state encountered.
         public bool DebugNoLayouts { get; set; } = false;
         public int DebugNoLayoutsTopPairs { get; set; } = 6;
         public int DebugNoLayoutsTopEdges { get; set; } = 16;
         public bool DebugEnergyMismatch { get; set; } = true;
+
+        public Settings Clone()
+        {
+            return new Settings
+            {
+                MaxLayoutsPerChain = MaxLayoutsPerChain,
+                TemperatureSteps = TemperatureSteps,
+                InnerIterations = InnerIterations,
+                Cooling = Cooling,
+                ChangePrefabProbability = ChangePrefabProbability,
+                MaxWiggleCandidates = MaxWiggleCandidates,
+                WiggleProbability = WiggleProbability,
+                MaxFallbackCandidates = MaxFallbackCandidates,
+                VerboseConfigSpaceLogs = VerboseConfigSpaceLogs,
+                MaxConfigSpaceLogs = MaxConfigSpaceLogs,
+                LogConfigSpaceSizeSummary = LogConfigSpaceSizeSummary,
+                MaxConfigSpaceSizePairs = MaxConfigSpaceSizePairs,
+                LogLayoutProfiling = LogLayoutProfiling,
+                UseBitsetOverlap = UseBitsetOverlap,
+                UseRejectionSamplingCandidates = UseRejectionSamplingCandidates,
+                OverlapPenaltyCap = OverlapPenaltyCap,
+                OverlapPenaltyCapSlack = OverlapPenaltyCapSlack,
+                UseConflictDrivenTargetSelection = UseConflictDrivenTargetSelection,
+                TargetSelectionTournamentK = TargetSelectionTournamentK,
+                TargetSelectionExplorationProbability = TargetSelectionExplorationProbability,
+                LayoutDeadlineRealtime = LayoutDeadlineRealtime,
+                DebugNoLayouts = DebugNoLayouts,
+                DebugNoLayoutsTopPairs = DebugNoLayoutsTopPairs,
+                DebugNoLayoutsTopEdges = DebugNoLayoutsTopEdges,
+                DebugEnergyMismatch = DebugEnergyMismatch
+            };
+        }
     }
 
     public sealed class LayoutResult
@@ -108,6 +161,7 @@ public sealed partial class MapGraphLayoutGenerator
 
     private readonly System.Random rng;
     private readonly Settings settings;
+    private bool annealingActive;
 
     private static readonly Dictionary<(Grid grid, Tilemap floor, Tilemap wall), ShapeLibrary> ShapeLibrariesByStamp = new();
     private static readonly Dictionary<(Grid grid, Tilemap floor, Tilemap wall), ConfigurationSpaceLibrary> ConfigSpaceLibrariesByStamp = new();
@@ -161,6 +215,19 @@ public sealed partial class MapGraphLayoutGenerator
 
     private static long NowTicks() => Stopwatch.GetTimestamp();
     private static double TicksToMs(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+
+    private bool CheckLayoutDeadline(string scope)
+    {
+        if (settings == null || settings.LayoutDeadlineRealtime <= 0f)
+            return true;
+        if (Time.realtimeSinceStartup <= settings.LayoutDeadlineRealtime)
+            return true;
+
+        lastFailureDetail = string.IsNullOrEmpty(scope)
+            ? "Layout time limit exceeded during layout generation."
+            : $"Layout time limit exceeded during {scope}.";
+        return false;
+    }
 
     public MapGraphLayoutGenerator(int? seed = null, Settings settings = null)
     {

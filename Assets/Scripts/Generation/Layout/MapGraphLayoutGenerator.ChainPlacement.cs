@@ -9,6 +9,8 @@ public sealed partial class MapGraphLayoutGenerator
     private List<LayoutState> AddChain(LayoutState baseState, MapGraphChainBuilder.Chain chain, int maxLayouts)
     {
         using var _ps = PS(S_AddChain);
+        if (!CheckLayoutDeadline("chain expansion"))
+            return new List<LayoutState>();
         if (profiling != null)
             profiling.AddChainCalls++;
         var deepProfile = settings != null && settings.LogLayoutProfiling;
@@ -29,6 +31,8 @@ public sealed partial class MapGraphLayoutGenerator
         {
             current = GetInitialLayout(baseState, chain);
         }
+        if (!CheckLayoutDeadline("chain initial layout"))
+            return generated;
         if (profiling != null)
             profiling.GetInitialLayoutTicks += NowTicks() - initStart;
         if (current == null)
@@ -72,87 +76,213 @@ public sealed partial class MapGraphLayoutGenerator
         var positionCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxFallbackCandidates));
         var wiggleCandidates = new List<Vector2Int>(Mathf.Max(16, settings.MaxWiggleCandidates));
 
-        var saStart = profiling != null ? NowTicks() : 0;
-        using (PSIf(deepProfile, S_AddChain_SA))
-        {
-            for (int t = 0; t < Mathf.Max(1, settings.TemperatureSteps); t++)
-            {
-                for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
-                {
-                    var currentEnergy = energyCache.TotalEnergy;
-                    pairChanges.Clear();
-                    edgeChanges.Clear();
-                    if (!TryPerturbInPlace(rooms, energyCache, movableNodeIndices, positionCandidates, wiggleCandidates, pairChanges, edgeChanges, out var undo))
-                        continue;
+        var canFallbackSa = settings != null && (settings.UseConflictDrivenTargetSelection || settings.OverlapPenaltyCap > 0);
 
-                    var perturbedEnergy = energyCache.TotalEnergy;
-                    var delta = perturbedEnergy - currentEnergy;
+	        var saStart = profiling != null ? NowTicks() : 0;
+	        using (PSIf(deepProfile, S_AddChain_SA))
+	        {
+	            var prevAnnealing = annealingActive;
+	            annealingActive = true;
+	            try
+	            {
+	                for (int t = 0; t < Mathf.Max(1, settings.TemperatureSteps); t++)
+	                {
+                        if (!CheckLayoutDeadline("SA"))
+                            return generated;
+	                    for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
+	                    {
+                            if ((i & 15) == 0 && !CheckLayoutDeadline("SA"))
+                                return generated;
+	                        var currentEnergy = energyCache.TotalEnergy;
+	                        pairChanges.Clear();
+	                        edgeChanges.Clear();
+	                        if (!TryPerturbInPlace(rooms, energyCache, movableNodeIndices, positionCandidates, wiggleCandidates, pairChanges, edgeChanges, out var undo))
+	                            continue;
 
-                    // Expensive O(n^2) validation is only paid when energy says we're at a “complete” solution
-                    // (no illegal overlaps + all currently-placed edges touch).
-                    using (PSIf(deepProfile, S_AddChain_OutputCheck))
-                    {
-                        if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain))
-                        {
-                            if (TryValidateLayout(rooms, out var validationError))
-                            {
-                                using (PSIf(deepProfile, S_AddChain_Snapshot))
-                                {
-                                    var snapshotRooms = CloneRoomsDeep(rooms);
-                                    var snapshotCache = BuildEnergyCache(snapshotRooms);
-                                    var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
-                                    generated.Add(snapshot);
-                                }
-                                if (profiling != null)
-                                    profiling.CandidateLayoutsAccepted++;
-                                if (generated.Count >= maxLayouts)
-                                {
-                                    if (profiling != null)
-                                        profiling.SaLoopTicks += NowTicks() - saStart;
-                                    return generated;
-                                }
-                            }
-                            else
-                            {
-                                if (settings != null && settings.DebugEnergyMismatch)
-                                {
-                                    // DIAGNOSTIC: Why is energy low but layout invalid?
-                                    var freshEnergy = ComputeEnergy(rooms);
-                                    Debug.LogError($"[LayoutGenerator] Energy-Validation Mismatch! CachedEnergy={energyCache.TotalEnergy:F4} FreshEnergy={freshEnergy:F4}. Error: {validationError}");
+	                        var perturbedEnergy = energyCache.TotalEnergy;
+	                        var delta = perturbedEnergy - currentEnergy;
 
-                                    // Brute-force check removed. Fix applied in GetInitialLayout.
-                                }
-                            }
-                        }
-                    }
+	                        // Expensive O(n^2) validation is only paid when energy says we're at a “complete” solution
+	                        // (no illegal overlaps + all currently-placed edges touch).
+	                        using (PSIf(deepProfile, S_AddChain_OutputCheck))
+	                        {
+	                            if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain))
+	                            {
+	                                if (TryValidateLayout(rooms, out var validationError))
+	                                {
+	                                    using (PSIf(deepProfile, S_AddChain_Snapshot))
+	                                    {
+	                                        var snapshotRooms = CloneRoomsDeep(rooms);
+	                                        var snapshotCache = BuildEnergyCache(snapshotRooms);
+	                                        var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
+	                                        generated.Add(snapshot);
+	                                    }
+	                                    if (profiling != null)
+	                                        profiling.CandidateLayoutsAccepted++;
+	                                    if (generated.Count >= maxLayouts)
+	                                    {
+	                                        if (profiling != null)
+	                                            profiling.SaLoopTicks += NowTicks() - saStart;
+	                                        return generated;
+	                                    }
+	                                }
+	                                else
+	                                {
+	                                    if (settings != null && settings.DebugEnergyMismatch)
+	                                    {
+	                                        // DIAGNOSTIC: Why is energy low but layout invalid?
+	                                        var freshEnergy = ComputeEnergy(rooms);
+	                                        Debug.LogError($"[LayoutGenerator] Energy-Validation Mismatch! CachedEnergy={energyCache.TotalEnergy:F4} FreshEnergy={freshEnergy:F4}. Error: {validationError}");
 
-                    if (delta < 0f)
-                        continue;
+	                                        // Brute-force check removed. Fix applied in GetInitialLayout.
+	                                    }
+	                                }
+	                            }
+	                        }
 
-                    using (PSIf(deepProfile, S_AddChain_AcceptReject))
-                    {
-                        var p = Mathf.Exp(-delta / Mathf.Max(0.0001f, temperature));
-                        if (rng.NextDouble() >= p)
-                            UndoMove(rooms, energyCache, undo, pairChanges, edgeChanges);
-                    }
+	                        if (delta < 0f)
+	                            continue;
 
-                    if (settings.DebugNoLayouts)
-                    {
-                        var eNow = energyCache.TotalEnergy;
-                        if (eNow < bestEnergy)
-                        {
-                            bestEnergy = eNow;
-                            bestRoomsSnapshot = CloneRoomsDeep(rooms);
-                        }
-                    }
-                }
+	                        using (PSIf(deepProfile, S_AddChain_AcceptReject))
+	                        {
+	                            var p = Mathf.Exp(-delta / Mathf.Max(0.0001f, temperature));
+	                            if (rng.NextDouble() >= p)
+	                                UndoMove(rooms, energyCache, undo, pairChanges, edgeChanges);
+	                        }
 
-                temperature *= Mathf.Clamp(settings.Cooling, 0.01f, 0.999f);
-            }
-        }
+	                        if (settings.DebugNoLayouts)
+	                        {
+	                            var eNow = energyCache.TotalEnergy;
+	                            if (eNow < bestEnergy)
+	                            {
+	                                bestEnergy = eNow;
+	                                bestRoomsSnapshot = CloneRoomsDeep(rooms);
+	                            }
+	                        }
+	                    }
+
+	                    temperature *= Mathf.Clamp(settings.Cooling, 0.01f, 0.999f);
+	                }
+	            }
+	            finally
+	            {
+	                annealingActive = prevAnnealing;
+	            }
+	        }
 
         if (profiling != null)
             profiling.SaLoopTicks += NowTicks() - saStart;
+
+        if (generated.Count == 0 && canFallbackSa)
+        {
+            var chainIds = string.Join(",", chain.Nodes.Select(n => n?.id));
+            Debug.LogWarning($"[LayoutGenerator] SA produced 0 layouts for chain [{chainIds}]. Retrying with safer settings (random target selection + exact overlaps, fresh init).");
+
+            var prevConflict = settings.UseConflictDrivenTargetSelection;
+            var prevCap = settings.OverlapPenaltyCap;
+            var prevSlack = settings.OverlapPenaltyCapSlack;
+
+            // Rebuild starting state for retry (fresh initial layout).
+            var retryState = GetInitialLayout(baseState, chain);
+            if (retryState == null)
+            {
+                Debug.LogWarning($"[LayoutGenerator] Retry init failed: GetInitialLayout returned null for chain [{chainIds}].");
+            }
+            else
+            {
+                rooms = retryState.Rooms;
+                energyCache = retryState.EnergyCache ?? BuildEnergyCache(rooms);
+                temperature = EstimateInitialTemperature(chain, rooms);
+
+                movableNodeIndices.Clear();
+                for (var i = 0; i < chainNodeIndices.Count; i++)
+                {
+                    var idx = chainNodeIndices[i];
+                    if (idx >= 0 && idx < energyCache.NodeCount && energyCache.IsPlaced[idx])
+                        movableNodeIndices.Add(idx);
+                }
+
+                var saRetryStart = profiling != null ? NowTicks() : 0;
+                using (PSIf(deepProfile, S_AddChain_SA))
+                {
+                    var prevAnnealing = annealingActive;
+                    annealingActive = true;
+                    settings.UseConflictDrivenTargetSelection = false;
+                    settings.OverlapPenaltyCap = 0;
+                    settings.OverlapPenaltyCapSlack = 0;
+
+                    try
+                    {
+                        for (int t = 0; t < Mathf.Max(1, settings.TemperatureSteps); t++)
+                        {
+                            if (!CheckLayoutDeadline("SA fallback"))
+                                return generated;
+                            for (int i = 0; i < Mathf.Max(1, settings.InnerIterations); i++)
+                            {
+                                if ((i & 15) == 0 && !CheckLayoutDeadline("SA fallback"))
+                                    return generated;
+                                var currentEnergy = energyCache.TotalEnergy;
+                                pairChanges.Clear();
+                                edgeChanges.Clear();
+                                if (!TryPerturbInPlace(rooms, energyCache, movableNodeIndices, positionCandidates, wiggleCandidates, pairChanges, edgeChanges, out var undo))
+                                    continue;
+
+                                var perturbedEnergy = energyCache.TotalEnergy;
+                                var delta = perturbedEnergy - currentEnergy;
+
+                                using (PSIf(deepProfile, S_AddChain_OutputCheck))
+                                {
+                                    if (ShouldValidateForOutput(energyCache) && DifferentEnough(rooms, generated, chain))
+                                    {
+                                        if (TryValidateLayout(rooms, out _))
+                                        {
+                                            using (PSIf(deepProfile, S_AddChain_Snapshot))
+                                            {
+                                                var snapshotRooms = CloneRoomsDeep(rooms);
+                                                var snapshotCache = BuildEnergyCache(snapshotRooms);
+                                                var snapshot = new LayoutState(snapshotRooms, baseState.ChainIndex, snapshotCache);
+                                                generated.Add(snapshot);
+                                            }
+                                            if (profiling != null)
+                                                profiling.CandidateLayoutsAccepted++;
+                                            if (generated.Count >= maxLayouts)
+                                            {
+                                                if (profiling != null)
+                                                    profiling.SaLoopTicks += NowTicks() - saRetryStart;
+                                                return generated;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (delta < 0f)
+                                    continue;
+
+                                using (PSIf(deepProfile, S_AddChain_AcceptReject))
+                                {
+                                    var p = Mathf.Exp(-delta / Mathf.Max(0.0001f, temperature));
+                                    if (rng.NextDouble() >= p)
+                                        UndoMove(rooms, energyCache, undo, pairChanges, edgeChanges);
+                                }
+                            }
+
+                            temperature *= Mathf.Clamp(settings.Cooling, 0.01f, 0.999f);
+                        }
+                    }
+                    finally
+                    {
+                        settings.UseConflictDrivenTargetSelection = prevConflict;
+                        settings.OverlapPenaltyCap = prevCap;
+                        settings.OverlapPenaltyCapSlack = prevSlack;
+                        annealingActive = prevAnnealing;
+                    }
+                }
+
+                if (profiling != null)
+                    profiling.SaLoopTicks += NowTicks() - saRetryStart;
+            }
+
+        }
 
         if (generated.Count == 0)
         {
@@ -170,6 +300,8 @@ public sealed partial class MapGraphLayoutGenerator
     private List<LayoutState> AddChainSmall(LayoutState baseState, MapGraphChainBuilder.Chain chain, int maxLayouts)
     {
         using var _ps = PS(S_AddChainSmall);
+        if (!CheckLayoutDeadline("small chain expansion"))
+            return new List<LayoutState>();
         if (profiling != null)
             profiling.AddChainSmallCalls++;
 

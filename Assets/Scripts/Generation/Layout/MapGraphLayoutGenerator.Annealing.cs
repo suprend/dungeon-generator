@@ -8,24 +8,24 @@ public sealed partial class MapGraphLayoutGenerator
 {
     private readonly struct PairPenaltyChange
     {
-        public int Index { get; }
+        public int OtherIndex { get; }
         public float OldValue { get; }
 
-        public PairPenaltyChange(int index, float oldValue)
+        public PairPenaltyChange(int otherIndex, float oldValue)
         {
-            Index = index;
+            OtherIndex = otherIndex;
             OldValue = oldValue;
         }
     }
 
     private readonly struct EdgePenaltyChange
     {
-        public int Index { get; }
+        public int OtherIndex { get; }
         public float OldValue { get; }
 
-        public EdgePenaltyChange(int index, float oldValue)
+        public EdgePenaltyChange(int otherIndex, float oldValue)
         {
-            Index = index;
+            OtherIndex = otherIndex;
             OldValue = oldValue;
         }
     }
@@ -93,7 +93,45 @@ public sealed partial class MapGraphLayoutGenerator
         string targetId;
         using (PS(S_Perturb_SelectTarget))
         {
-            targetIndex = movableNodeIndices[rng.Next(movableNodeIndices.Count)];
+            var useConflictSelection =
+                settings != null &&
+                settings.UseConflictDrivenTargetSelection &&
+                energyCache.OverlapByNode != null &&
+                energyCache.EdgeByNode != null &&
+                energyCache.OverlapByNode.Length == energyCache.NodeCount &&
+                energyCache.EdgeByNode.Length == energyCache.NodeCount;
+
+            if (!useConflictSelection ||
+                movableNodeIndices.Count < 2 ||
+                rng.NextDouble() < Mathf.Clamp01(settings.TargetSelectionExplorationProbability))
+            {
+                targetIndex = movableNodeIndices[rng.Next(movableNodeIndices.Count)];
+            }
+            else
+            {
+                var k = Mathf.Clamp(settings.TargetSelectionTournamentK, 2, 8);
+                k = Mathf.Min(k, movableNodeIndices.Count);
+
+                var bestIdx = -1;
+                var bestScore = 0f;
+                for (var t = 0; t < k; t++)
+                {
+                    var cand = movableNodeIndices[rng.Next(movableNodeIndices.Count)];
+                    if (cand < 0 || cand >= energyCache.NodeCount)
+                        continue;
+                    var score = OverlapWeight * energyCache.OverlapByNode[cand] + DistanceWeight * energyCache.EdgeByNode[cand];
+                    if (bestIdx < 0 || score > bestScore)
+                    {
+                        bestIdx = cand;
+                        bestScore = score;
+                    }
+                }
+
+                targetIndex = bestIdx >= 0 && bestScore > 0f
+                    ? bestIdx
+                    : movableNodeIndices[rng.Next(movableNodeIndices.Count)];
+            }
+
             if (targetIndex < 0 || targetIndex >= energyCache.NodeCount)
                 return false;
             targetPlacement = energyCache.PlacementsByIndex[targetIndex];
@@ -166,14 +204,34 @@ public sealed partial class MapGraphLayoutGenerator
 
         using (PS(S_Perturb_ApplyMove))
         {
+            var oldPrefab = targetPlacement.Prefab;
+            var oldShape = targetPlacement.Shape;
+            var oldRoot = targetPlacement.Root;
+
             var newRoot = candidates[rng.Next(candidates.Count)];
+            if (newRoot == oldRoot && ReferenceEquals(newPrefab, oldPrefab) && ReferenceEquals(newShape, oldShape))
+            {
+                // Avoid paying UpdateEnergyCacheInPlace for no-op perturbations.
+                // Resample a few times (handles duplicates / existingRoot in candidates).
+                var resamples = Mathf.Min(4, candidates.Count);
+                for (var r = 0; r < resamples; r++)
+                {
+                    newRoot = candidates[rng.Next(candidates.Count)];
+                    if (newRoot != oldRoot)
+                        break;
+                }
+
+                if (newRoot == oldRoot && ReferenceEquals(newPrefab, oldPrefab) && ReferenceEquals(newShape, oldShape))
+                    return false;
+            }
+
             undo = new MoveUndo(
                 targetId,
                 targetIndex,
                 targetPlacement,
-                targetPlacement.Prefab,
-                targetPlacement.Shape,
-                targetPlacement.Root,
+                oldPrefab,
+                oldShape,
+                oldRoot,
                 energyCache.OverlapPenaltySum,
                 energyCache.DistancePenaltySum);
 
@@ -192,8 +250,19 @@ public sealed partial class MapGraphLayoutGenerator
         using var _ps = PS(S_WiggleCandidates);
         var start = profiling != null ? NowTicks() : 0;
         result?.Clear();
+        void Finish()
+        {
+            if (profiling != null)
+            {
+                profiling.WiggleCandidatesCalls++;
+                profiling.WiggleCandidatesTicks += NowTicks() - start;
+            }
+        }
         if (string.IsNullOrEmpty(nodeId) || prefab == null || placed == null)
+        {
+            Finish();
             return;
+        }
 
         neighborRootsScratch.Clear();
         foreach (var e in graphAsset.GetEdgesFor(nodeId))
@@ -211,9 +280,13 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         if (neighborRootsScratch.Count == 0)
+        {
+            Finish();
             return;
+        }
 
         var limit = Mathf.Max(1, settings.MaxWiggleCandidates);
+        var useSampling = settings != null && settings.UseRejectionSamplingCandidates;
 
         if (neighborRootsScratch.Count >= 2)
         {
@@ -250,38 +323,60 @@ public sealed partial class MapGraphLayoutGenerator
                     b = tmp;
                 }
 
-                var seen = 0;
                 var offsA = a.space.OffsetsList;
-                for (var idxA = 0; idxA < offsA.Count; idxA++)
+                if (offsA != null && offsA.Count > 0)
                 {
-                    var pos = a.placement.Root + offsA[idxA];
-                    var delta = pos - b.placement.Root;
-                    
-                    // Fast BitGrid lookup instead of HashSet
-                    if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
-                        continue;
-
-                    seen++;
-                    if (result != null)
+                    if (useSampling)
                     {
-                        if (result.Count < limit)
-                            result.Add(pos);
-                        else
+                        // Keep this bounded: WiggleCandidates is called very frequently in SA.
+                        // Oversample a little, but don't do huge rejection loops when acceptance rate is low.
+                        var attempts = Mathf.Min(offsA.Count, Mathf.Clamp(limit * 16, 64, 1024));
+                        for (var it = 0; it < attempts && (result == null || result.Count < limit); it++)
                         {
-                            var j = rng.Next(seen);
-                            if (j < limit)
-                                result[j] = pos;
+                            var pos = a.placement.Root + offsA[rng.Next(offsA.Count)];
+                            var delta = pos - b.placement.Root;
+
+                            var ok = false;
+                            if (b.space.Grid != null)
+                                ok = b.space.Grid.IsSet(delta);
+                            else if (b.space != null)
+                                ok = b.space.Contains(delta);
+
+                            if (ok)
+                                result?.Add(pos);
+                        }
+                    }
+                    else
+                    {
+                        var seen = 0;
+                        for (var idxA = 0; idxA < offsA.Count; idxA++)
+                        {
+                            var pos = a.placement.Root + offsA[idxA];
+                            var delta = pos - b.placement.Root;
+
+                            // Fast BitGrid lookup instead of HashSet
+                            if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
+                                continue;
+
+                            seen++;
+                            if (result != null)
+                            {
+                                if (result.Count < limit)
+                                    result.Add(pos);
+                                else
+                                {
+                                    var j = rng.Next(seen);
+                                    if (j < limit)
+                                        result[j] = pos;
+                                }
+                            }
                         }
                     }
                 }
 
                 if (result != null && result.Count > 0)
                 {
-                    if (profiling != null)
-                    {
-                        profiling.WiggleCandidatesCalls++;
-                        profiling.WiggleCandidatesTicks += NowTicks() - start;
-                    }
+                    Finish();
                     return;
                 }
             }
@@ -290,37 +385,22 @@ public sealed partial class MapGraphLayoutGenerator
         var idx = rng.Next(neighborRootsScratch.Count);
         var baseNeighbor = neighborRootsScratch[idx];
         var offs = baseNeighbor.space.OffsetsList;
-        if (result != null && offs.Count > 0)
+        if (result != null && offs != null && offs.Count > 0)
         {
-            if (offs.Count <= limit)
+            if (!useSampling || offs.Count <= limit)
             {
                 for (var i = 0; i < offs.Count; i++)
                     result.Add(baseNeighbor.placement.Root + offs[i]);
             }
             else
             {
-                var seen = 0;
-                for (var i = 0; i < offs.Count; i++)
-                {
-                    var pos = baseNeighbor.placement.Root + offs[i];
-                    seen++;
-                    if (result.Count < limit)
-                        result.Add(pos);
-                    else
-                    {
-                        var j = rng.Next(seen);
-                        if (j < limit)
-                            result[j] = pos;
-                    }
-                }
+                // No rejection needed here (single neighbor) — just take a few random offsets.
+                for (var i = 0; i < limit; i++)
+                    result.Add(baseNeighbor.placement.Root + offs[rng.Next(offs.Count)]);
             }
         }
 
-        if (profiling != null)
-        {
-            profiling.WiggleCandidatesCalls++;
-            profiling.WiggleCandidatesTicks += NowTicks() - start;
-        }
+        Finish();
     }
 
     private void WiggleCandidates(int nodeIndex, GameObject prefab, EnergyCache cache, List<Vector2Int> result)
@@ -328,8 +408,19 @@ public sealed partial class MapGraphLayoutGenerator
         using var _ps = PS(S_WiggleCandidates);
         var start = profiling != null ? NowTicks() : 0;
         result?.Clear();
+        void Finish()
+        {
+            if (profiling != null)
+            {
+                profiling.WiggleCandidatesCalls++;
+                profiling.WiggleCandidatesTicks += NowTicks() - start;
+            }
+        }
         if (prefab == null || cache == null || neighborIndicesByIndex == null || nodeIndex < 0 || nodeIndex >= neighborIndicesByIndex.Length)
+        {
+            Finish();
             return;
+        }
 
         neighborRootsScratch.Clear();
         var neigh = neighborIndicesByIndex[nodeIndex];
@@ -349,9 +440,13 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         if (neighborRootsScratch.Count == 0)
+        {
+            Finish();
             return;
+        }
 
         var limit = Mathf.Max(1, settings.MaxWiggleCandidates);
+        var useSampling = settings != null && settings.UseRejectionSamplingCandidates;
 
         if (neighborRootsScratch.Count >= 2)
         {
@@ -388,38 +483,60 @@ public sealed partial class MapGraphLayoutGenerator
                     b = tmp;
                 }
 
-                var seen = 0;
                 var offsA = a.space.OffsetsList;
-                for (var idxA = 0; idxA < offsA.Count; idxA++)
+                if (offsA != null && offsA.Count > 0)
                 {
-                    var pos = a.placement.Root + offsA[idxA];
-                    var delta = pos - b.placement.Root;
-                    
-                    // Fast BitGrid lookup instead of HashSet
-                    if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
-                        continue;
-
-                    seen++;
-                    if (result != null)
+                    if (useSampling)
                     {
-                        if (result.Count < limit)
-                            result.Add(pos);
-                        else
+                        // Keep this bounded: WiggleCandidates is called very frequently in SA.
+                        // Oversample a little, but don't do huge rejection loops when acceptance rate is low.
+                        var attempts = Mathf.Min(offsA.Count, Mathf.Clamp(limit * 16, 64, 1024));
+                        for (var it = 0; it < attempts && (result == null || result.Count < limit); it++)
                         {
-                            var j = rng.Next(seen);
-                            if (j < limit)
-                                result[j] = pos;
+                            var pos = a.placement.Root + offsA[rng.Next(offsA.Count)];
+                            var delta = pos - b.placement.Root;
+
+                            var ok = false;
+                            if (b.space.Grid != null)
+                                ok = b.space.Grid.IsSet(delta);
+                            else if (b.space != null)
+                                ok = b.space.Contains(delta);
+
+                            if (ok)
+                                result?.Add(pos);
+                        }
+                    }
+                    else
+                    {
+                        var seen = 0;
+                        for (var idxA = 0; idxA < offsA.Count; idxA++)
+                        {
+                            var pos = a.placement.Root + offsA[idxA];
+                            var delta = pos - b.placement.Root;
+
+                            // Fast BitGrid lookup instead of HashSet
+                            if (b.space.Grid == null || !b.space.Grid.IsSet(delta))
+                                continue;
+
+                            seen++;
+                            if (result != null)
+                            {
+                                if (result.Count < limit)
+                                    result.Add(pos);
+                                else
+                                {
+                                    var j = rng.Next(seen);
+                                    if (j < limit)
+                                        result[j] = pos;
+                                }
+                            }
                         }
                     }
                 }
 
                 if (result != null && result.Count > 0)
                 {
-                    if (profiling != null)
-                    {
-                        profiling.WiggleCandidatesCalls++;
-                        profiling.WiggleCandidatesTicks += NowTicks() - start;
-                    }
+                    Finish();
                     return;
                 }
             }
@@ -428,37 +545,22 @@ public sealed partial class MapGraphLayoutGenerator
         var idx = rng.Next(neighborRootsScratch.Count);
         var baseNeighbor = neighborRootsScratch[idx];
         var offs = baseNeighbor.space.OffsetsList;
-        if (result != null && offs.Count > 0)
+        if (result != null && offs != null && offs.Count > 0)
         {
-            if (offs.Count <= limit)
+            if (!useSampling || offs.Count <= limit)
             {
                 for (var i = 0; i < offs.Count; i++)
                     result.Add(baseNeighbor.placement.Root + offs[i]);
             }
             else
             {
-                var seen = 0;
-                for (var i = 0; i < offs.Count; i++)
-                {
-                    var pos = baseNeighbor.placement.Root + offs[i];
-                    seen++;
-                    if (result.Count < limit)
-                        result.Add(pos);
-                    else
-                    {
-                        var j = rng.Next(seen);
-                        if (j < limit)
-                            result[j] = pos;
-                    }
-                }
+                // No rejection needed here (single neighbor) — just take a few random offsets.
+                for (var i = 0; i < limit; i++)
+                    result.Add(baseNeighbor.placement.Root + offs[rng.Next(offs.Count)]);
             }
         }
 
-        if (profiling != null)
-        {
-            profiling.WiggleCandidatesCalls++;
-            profiling.WiggleCandidatesTicks += NowTicks() - start;
-        }
+        Finish();
     }
 
     private void UpdateEnergyCacheInPlace(
@@ -525,9 +627,15 @@ public sealed partial class MapGraphLayoutGenerator
             if (newP == oldP)
                 continue;
 
-            pairChanges.Add(new PairPenaltyChange(pIdx, oldP));
+            pairChanges.Add(new PairPenaltyChange(otherIndex, oldP));
             energyCache.PairPenalty[pIdx] = newP;
-            overlapSum += newP - oldP;
+            var dP = newP - oldP;
+            overlapSum += dP;
+            if (energyCache.OverlapByNode != null && energyCache.OverlapByNode.Length == energyCache.NodeCount)
+            {
+                energyCache.OverlapByNode[changedIndex] += dP;
+                energyCache.OverlapByNode[otherIndex] += dP;
+            }
         }
 
         if (neighborIndicesByIndex != null && changedIndex < neighborIndicesByIndex.Length)
@@ -549,9 +657,15 @@ public sealed partial class MapGraphLayoutGenerator
                 if (newD == oldD)
                     continue;
 
-                edgeChanges.Add(new EdgePenaltyChange(eIdx, oldD));
+                edgeChanges.Add(new EdgePenaltyChange(otherIndex, oldD));
                 energyCache.EdgePenalty[eIdx] = newD;
-                distSum += newD - oldD;
+                var dD = newD - oldD;
+                distSum += dD;
+                if (energyCache.EdgeByNode != null && energyCache.EdgeByNode.Length == energyCache.NodeCount)
+                {
+                    energyCache.EdgeByNode[changedIndex] += dD;
+                    energyCache.EdgeByNode[otherIndex] += dD;
+                }
             }
         }
 
@@ -592,8 +706,21 @@ public sealed partial class MapGraphLayoutGenerator
             for (int i = 0; i < pairChanges.Count; i++)
             {
                 var ch = pairChanges[i];
-                if (ch.Index >= 0 && ch.Index < energyCache.PairPenalty.Length)
-                    energyCache.PairPenalty[ch.Index] = ch.OldValue;
+                var otherIndex = ch.OtherIndex;
+                var pIdx = PairIndex(undo.NodeIndex, otherIndex, energyCache.NodeCount);
+                if (pIdx < 0 || pIdx >= energyCache.PairPenalty.Length)
+                    continue;
+
+                var newP = energyCache.PairPenalty[pIdx];
+                var oldP = ch.OldValue;
+                var dP = oldP - newP;
+                if (energyCache.OverlapByNode != null && energyCache.OverlapByNode.Length == energyCache.NodeCount)
+                {
+                    energyCache.OverlapByNode[undo.NodeIndex] += dP;
+                    if (otherIndex >= 0 && otherIndex < energyCache.NodeCount)
+                        energyCache.OverlapByNode[otherIndex] += dP;
+                }
+                energyCache.PairPenalty[pIdx] = oldP;
             }
         }
 
@@ -602,8 +729,21 @@ public sealed partial class MapGraphLayoutGenerator
             for (int i = 0; i < edgeChanges.Count; i++)
             {
                 var ch = edgeChanges[i];
-                if (ch.Index >= 0 && ch.Index < energyCache.EdgePenalty.Length)
-                    energyCache.EdgePenalty[ch.Index] = ch.OldValue;
+                var otherIndex = ch.OtherIndex;
+                var eIdx = PairIndex(undo.NodeIndex, otherIndex, energyCache.NodeCount);
+                if (eIdx < 0 || eIdx >= energyCache.EdgePenalty.Length)
+                    continue;
+
+                var newD = energyCache.EdgePenalty[eIdx];
+                var oldD = ch.OldValue;
+                var dD = oldD - newD;
+                if (energyCache.EdgeByNode != null && energyCache.EdgeByNode.Length == energyCache.NodeCount)
+                {
+                    energyCache.EdgeByNode[undo.NodeIndex] += dD;
+                    if (otherIndex >= 0 && otherIndex < energyCache.NodeCount)
+                        energyCache.EdgeByNode[otherIndex] += dD;
+                }
+                energyCache.EdgePenalty[eIdx] = oldD;
             }
         }
     }

@@ -34,6 +34,9 @@ public sealed partial class MapGraphLayoutGenerator
         {
             while (stack.Count > 0)
             {
+                if (!CheckLayoutDeadline("layout stack search"))
+                    break;
+
                 LayoutState state;
                 using (PSIf(deepProfile, S_StackSearch_Pop))
                 {

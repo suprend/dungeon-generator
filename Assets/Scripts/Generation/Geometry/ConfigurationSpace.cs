@@ -1,6 +1,6 @@
 // Assets/Scripts/Generation/Geometry/ConfigurationSpace.cs
 using System.Collections.Generic;
-using System.Linq;
+using System;
 using UnityEngine;
 
 /// <summary>
@@ -9,7 +9,7 @@ using UnityEngine;
 public sealed class ConfigurationSpace
 {
     private static readonly HashSet<Vector2Int> EmptyOffsetsSet = new();
-    private static readonly IReadOnlyList<Vector2Int> EmptyOffsetsList = new List<Vector2Int>();
+    private static readonly IReadOnlyList<Vector2Int> EmptyOffsetsList = Array.Empty<Vector2Int>();
     public static readonly ConfigurationSpace Empty = new(EmptyOffsetsSet, EmptyOffsetsList);
 
     public HashSet<Vector2Int> Offsets { get; }
@@ -20,7 +20,7 @@ public sealed class ConfigurationSpace
     public ConfigurationSpace(HashSet<Vector2Int> offsets)
     {
         Offsets = offsets ?? new HashSet<Vector2Int>();
-        OffsetsList = Offsets.Count > 0 ? Offsets.ToList() : new List<Vector2Int>();
+        OffsetsList = BuildOffsetsList(Offsets);
         Grid = CreateGrid(Offsets);
     }
 
@@ -49,5 +49,17 @@ public sealed class ConfigurationSpace
             if (p.y > maxY) maxY = p.y;
         }
         return BitGrid.Build(offsets, new Vector2Int(minX, minY), new Vector2Int(maxX, maxY));
+    }
+
+    private static IReadOnlyList<Vector2Int> BuildOffsetsList(HashSet<Vector2Int> offsets)
+    {
+        if (offsets == null || offsets.Count == 0)
+            return EmptyOffsetsList;
+
+        var arr = new Vector2Int[offsets.Count];
+        var i = 0;
+        foreach (var p in offsets)
+            arr[i++] = p;
+        return arr;
     }
 }

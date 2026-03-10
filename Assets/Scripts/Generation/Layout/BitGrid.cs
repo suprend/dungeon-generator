@@ -125,6 +125,27 @@ public sealed class BitGrid
         }
     }
 
+    public int CountOverlapsShiftedCapped(BitGrid moving, Vector2Int shiftMovingToFixed, int cap)
+    {
+        if (cap < 0)
+            cap = int.MaxValue;
+        if (moving == null || Height == 0 || Width == 0 || moving.Height == 0 || moving.Width == 0)
+            return 0;
+
+        unsafe
+        {
+            fixed (ulong* fixedPtr = Bits)
+            fixed (ulong* movingPtr = moving.Bits)
+            {
+                return BitGridBurst.CountOverlapsShiftedCapped(
+                    fixedPtr, WordsPerRow, Height,
+                    movingPtr, moving.WordsPerRow, moving.Height,
+                    shiftMovingToFixed.x, shiftMovingToFixed.y,
+                    cap);
+            }
+        }
+    }
+
     public int CountIllegalOverlapsShifted(
         BitGrid moving,
         Vector2Int shiftMovingToFixed,

@@ -495,16 +495,22 @@ MonoBehaviour:
   destroyPlacedInstances: 1
   maxLayoutsPerChain: 4
   temperatureSteps: 24
-  innerIterations: 256
-  cooling: 0.85
+  innerIterations: 128
+  cooling: 0.8
   changePrefabProbability: 0.1
-  maxWiggleCandidates: 64
-  maxFallbackCandidates: 1024
+  maxWiggleCandidates: 32
+  maxFallbackCandidates: 256
   layoutAttempts: 1
   logConfigSpaceSizeSummary: 0
   maxConfigSpaceSizePairs: 12
   logLayoutProfiling: 0
   useBitsetOverlap: 1
+  useRejectionSamplingCandidates: 1
+  overlapPenaltyCap: 0
+  overlapPenaltyCapSlack: 64
+  useConflictDrivenTargetSelection: 1
+  targetSelectionTournamentK: 4
+  targetSelectionExplorationProbability: 0.15
   verboseConfigSpaceLogs: 0
   maxConfigSpaceLogs: 32
   debugNoLayouts: 0

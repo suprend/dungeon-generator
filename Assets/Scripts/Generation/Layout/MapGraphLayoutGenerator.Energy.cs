@@ -7,6 +7,7 @@ public sealed partial class MapGraphLayoutGenerator
 {
     private const float OverlapWeight = 1000f;
     private const float DistanceWeight = 1f;
+    private const float TopologyWeight = 8f;
     private const float InvalidEdgePenalty = 1000f;
 
     private readonly List<RoomPlacement> roomListScratch = new();

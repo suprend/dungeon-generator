@@ -491,16 +491,16 @@ MonoBehaviour:
   clearOnRun: 1
   randomSeed: 0
   verboseLogs: 0
-  placementTimeLimitSeconds: 2
+  layoutTimeLimitSeconds: 0.2
   destroyPlacedInstances: 1
   maxLayoutsPerChain: 4
-  temperatureSteps: 24
-  innerIterations: 128
-  cooling: 0.8
+  temperatureSteps: 10
+  innerIterations: 40
+  cooling: 0.68
   changePrefabProbability: 0.1
-  maxWiggleCandidates: 32
-  maxFallbackCandidates: 256
-  layoutAttempts: 1
+  maxWiggleCandidates: 10
+  maxFallbackCandidates: 64
+  layoutRetries: 20
   logConfigSpaceSizeSummary: 0
   maxConfigSpaceSizePairs: 12
   logLayoutProfiling: 0
@@ -511,6 +511,8 @@ MonoBehaviour:
   useConflictDrivenTargetSelection: 1
   targetSelectionTournamentK: 4
   targetSelectionExplorationProbability: 0.15
+  useBridgeExpansionBias: 0
+  useCycleClosureBias: 1
   verboseConfigSpaceLogs: 0
   maxConfigSpaceLogs: 32
   debugNoLayouts: 0

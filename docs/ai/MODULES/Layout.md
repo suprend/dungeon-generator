@@ -29,6 +29,7 @@
   - overlap penalty: запрещённые пересечения floor/wall (с исключениями bite/carve)
   - distance penalty: несостыкованные рёбра (CS mismatch) штрафуются квадратом расстояния
   - topology bias (опционально): bridge/articulation‑эвристика влияет на initial layout и на SA acceptance
+  - опциональный strict geometry mode: при `DisallowWallWallOverlap` в energy/validation/placement запрещается и `wall↔wall`, но bite/carve‑клетки коннектора остаются допустимыми
 
 ## Перформанс
 

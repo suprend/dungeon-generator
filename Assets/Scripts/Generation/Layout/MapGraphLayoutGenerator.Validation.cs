@@ -100,7 +100,7 @@ public sealed partial class MapGraphLayoutGenerator
                 if (aFloor == null || bFloor == null || aWall == null || bWall == null)
                     continue;
 
-                TryGetBiteAllowance(a, b, out var allowedFloorOverlap, out var allowedWallA, out var allowedWallB);
+                TryGetBiteAllowance(a, b, out var allowedFloorOverlap, out var allowedWallA, out var allowedWallB, out var allowedWallWall);
 
                 // AABB Optimization: Broadphase check
                 // Use WallMin/WallMax as they contain FloorCells. If walls bounding boxes don't overlap, nothing overlaps.
@@ -119,7 +119,7 @@ public sealed partial class MapGraphLayoutGenerator
 
                 var deltaBA = b.Root - a.Root;
                 var floorOverlapIllegal = settings != null && settings.UseBitsetOverlap
-                    ? CountIllegalOverlapBitset(a, b, OverlapType.FloorFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var overlapCellWorld)
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.FloorFloor, allowedFloorOverlap, allowedWallA, allowedWallB, allowedWallWall, out var overlapCellWorld)
                     : CountOverlapShifted(aFloor, bFloor, deltaBA, allowedFloorOverlap, a.Root, out overlapCellWorld, earlyStopAtTwo: true);
                 if (floorOverlapIllegal > 0)
                 {
@@ -128,7 +128,7 @@ public sealed partial class MapGraphLayoutGenerator
                 }
 
                 var wallOnFloorA = settings != null && settings.UseBitsetOverlap
-                    ? CountIllegalOverlapBitset(a, b, OverlapType.AWallOnBFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var badA)
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.AWallOnBFloor, allowedFloorOverlap, allowedWallA, allowedWallB, allowedWallWall, out var badA)
                     : CountOverlapShifted(aWall, bFloor, deltaBA, allowedWallA, a.Root, out badA, earlyStopAtTwo: true);
                 if (wallOnFloorA > 0)
                 {
@@ -138,12 +138,24 @@ public sealed partial class MapGraphLayoutGenerator
 
                 var deltaAB = a.Root - b.Root;
                 var wallOnFloorB = settings != null && settings.UseBitsetOverlap
-                    ? CountIllegalOverlapBitset(a, b, OverlapType.BWallOnAFloor, allowedFloorOverlap, allowedWallA, allowedWallB, out var badB)
+                    ? CountIllegalOverlapBitset(a, b, OverlapType.BWallOnAFloor, allowedFloorOverlap, allowedWallA, allowedWallB, allowedWallWall, out var badB)
                     : CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out badB, earlyStopAtTwo: true);
                 if (wallOnFloorB > 0)
                 {
                     error = $"Layout invalid: wall({b.NodeId}) overlaps floor({a.NodeId}) at {badB}.";
                     return false;
+                }
+
+                if (settings != null && settings.DisallowWallWallOverlap)
+                {
+                    var wallWallOverlap = settings.UseBitsetOverlap
+                        ? CountIllegalOverlapBitset(a, b, OverlapType.WallWall, allowedFloorOverlap, allowedWallA, allowedWallB, allowedWallWall, out var badWall)
+                        : CountOverlapShifted(aWall, bWall, deltaBA, allowedWallWall, a.Root, out badWall, earlyStopAtTwo: true);
+                    if (wallWallOverlap > 0)
+                    {
+                        error = $"Layout invalid: wall({a.NodeId}) overlaps wall({b.NodeId}) at {badWall}.";
+                        return false;
+                    }
                 }
             }
         }
@@ -183,7 +195,8 @@ public sealed partial class MapGraphLayoutGenerator
     {
         FloorFloor = 0,
         AWallOnBFloor = 1,
-        BWallOnAFloor = 2
+        BWallOnAFloor = 2,
+        WallWall = 3
     }
 
     private int CountIllegalOverlapBitset(
@@ -193,6 +206,7 @@ public sealed partial class MapGraphLayoutGenerator
         AllowedWorldCells allowedFloorOverlap,
         AllowedWorldCells allowedWallA,
         AllowedWorldCells allowedWallB,
+        AllowedWorldCells allowedWallWall,
         out Vector2Int lastOverlapWorld)
     {
         lastOverlapWorld = default;
@@ -233,6 +247,13 @@ public sealed partial class MapGraphLayoutGenerator
                 fixedRoot = b.Root;
                 delta = a.Root - b.Root;
                 break;
+            case OverlapType.WallWall:
+                fixedGrid = bitsA.Wall;
+                movingGrid = bitsB.Wall;
+                allowed = allowedWallWall;
+                fixedRoot = a.Root;
+                delta = b.Root - a.Root;
+                break;
             default:
                 return 0;
         }
@@ -251,6 +272,7 @@ public sealed partial class MapGraphLayoutGenerator
         AllowedWorldCells allowedFloorOverlap,
         AllowedWorldCells allowedWallA,
         AllowedWorldCells allowedWallB,
+        AllowedWorldCells allowedWallWall,
         out Vector2Int lastOverlapWorld)
     {
         // Only used when bitset mode is disabled.
@@ -285,6 +307,15 @@ public sealed partial class MapGraphLayoutGenerator
                     a.Root - b.Root,
                     allowedWallB,
                     b.Root,
+                    out lastOverlapWorld,
+                    earlyStopAtTwo: true);
+            case OverlapType.WallWall:
+                return CountOverlapShifted(
+                    a.Shape.WallCells,
+                    b.Shape.WallCells,
+                    b.Root - a.Root,
+                    allowedWallWall,
+                    a.Root,
                     out lastOverlapWorld,
                     earlyStopAtTwo: true);
             default:

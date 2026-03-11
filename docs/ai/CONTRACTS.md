@@ -60,6 +60,7 @@
 - `Floor↔Floor` запрещено **везде**, кроме `floor‑ray` на удовлетворённом `Room↔Connector`.
 - `Wall(connector)↔Floor(room)` разрешено только на `wall‑rays`.
 - `Wall(room)↔Floor(connector)` разрешено **только** в `doorCell = base + inward*X` (потому что сокеты комнат часто авторятся в стене, но при использовании ребра там должен быть проход).
+- `Wall↔Wall` по умолчанию допускается; при включённом `DisallowWallWallOverlap` становится запрещённым **вне реальной bite/carve‑маски**. Пересечения в клетках, которые всё равно будут вырезаны у коннектора при placement, не считаются багом.
 
 **Код‑якоря**
 - Маска как компактная структура: `Assets/Scripts/Generation/Layout/AllowedWorldCells.cs`.

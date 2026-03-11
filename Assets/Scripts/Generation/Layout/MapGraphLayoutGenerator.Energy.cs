@@ -221,7 +221,8 @@ public sealed partial class MapGraphLayoutGenerator
         var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
         var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
         var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
-        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor)
+        var checkWallWall = settings != null && settings.DisallowWallWallOverlap && BoundsOverlap(aWallMinW, aWallMaxW, bWallMinW, bWallMaxW);
+        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor && !checkWallWall)
             return 0f;
 
         var penalty = 0f;
@@ -239,7 +240,8 @@ public sealed partial class MapGraphLayoutGenerator
             bRoot,
             out var allowedFloor,
             out var allowedWallA,
-            out var allowedWallB);
+            out var allowedWallB,
+            out var allowedWallWall);
 
         if (checkFloorFloor)
         {
@@ -256,6 +258,9 @@ public sealed partial class MapGraphLayoutGenerator
             var deltaAB = aRoot - bRoot;
             penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, bRoot, out _, earlyStopAtTwo: false);
         }
+
+        if (checkWallWall)
+            penalty += CountOverlapShifted(aWall, bWall, deltaBA, allowedWallWall, aRoot, out _, earlyStopAtTwo: false);
 
         return penalty;
     }
@@ -363,7 +368,8 @@ public sealed partial class MapGraphLayoutGenerator
         var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
         var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
         var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
-        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor)
+        var checkWallWall = settings != null && settings.DisallowWallWallOverlap && BoundsOverlap(aWallMinW, aWallMaxW, bWallMinW, bWallMaxW);
+        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor && !checkWallWall)
             return 0f;
 
         var bitsA = GetBitsets(a.Shape);
@@ -382,6 +388,7 @@ public sealed partial class MapGraphLayoutGenerator
         var floorTotal = 0;
         var aWallTotal = 0;
         var bWallTotal = 0;
+        var wallWallTotal = 0;
 
         // First pass: count raw overlaps without computing bite allowance.
         // Most pairs have 0 overlaps even if their bounds touch; avoiding TryGetBiteAllowance() is a big win.
@@ -450,23 +457,44 @@ public sealed partial class MapGraphLayoutGenerator
             }
         }
 
-        if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0)
+        if (checkWallWall && aWall != null && bWall != null)
+        {
+            using var _psWallWall = PSIf(deepProfile, S_IntersectionPenalty_Bitset_AWall_BFloor);
+            var shift = (bWall.Min + deltaBA) - aWall.Min;
+            if (useCap)
+            {
+                var remaining = rawCap - (floorTotal + aWallTotal + bWallTotal + wallWallTotal);
+                if (remaining <= 0)
+                    return cap;
+                var c = aWall.CountOverlapsShiftedCapped(bWall, shift, remaining);
+                if (c > remaining)
+                    return cap;
+                wallWallTotal = c;
+            }
+            else
+            {
+                wallWallTotal = aWall.CountOverlapsShifted(bWall, shift);
+            }
+        }
+
+        if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0 && wallWallTotal == 0)
             return 0f;
 
         // OPTIMIZATION: Bite allowance only matters for graph neighbors (rooms with doors).
         // Non-neighbors always get full overlap penalty, no need for expensive bite calculation.
         if (!AreGraphNeighbors(a.NodeId, b.NodeId))
         {
-            var raw = floorTotal + aWallTotal + bWallTotal;
+            var raw = floorTotal + aWallTotal + bWallTotal + wallWallTotal;
             return useCap ? Mathf.Min(cap, raw) : raw;
         }
 
         AllowedWorldCells allowedFloor;
         AllowedWorldCells allowedWallA;
         AllowedWorldCells allowedWallB;
+        AllowedWorldCells allowedWallWall;
         using (PSIf(deepProfile, S_IntersectionPenalty_Bitset_BiteAllowance))
         {
-            TryGetBiteAllowance(a, b, out allowedFloor, out allowedWallA, out allowedWallB);
+            TryGetBiteAllowance(a, b, out allowedFloor, out allowedWallA, out allowedWallB, out allowedWallWall);
         }
 
         var penalty = 0;
@@ -511,6 +539,19 @@ public sealed partial class MapGraphLayoutGenerator
                 return cap;
         }
 
+        if (wallWallTotal > 0)
+        {
+            var allowed = 0;
+            using (PSIf(deepProfile, S_IntersectionPenalty_Bitset_Allowed))
+            {
+                if (!allowedWallWall.IsEmpty)
+                    allowed = CountAllowedOverlapCells(aWall, a.Root, bWall, b.Root, allowedWallWall);
+            }
+            penalty += Mathf.Max(0, wallWallTotal - allowed);
+            if (useCap && penalty >= cap)
+                return cap;
+        }
+
         if (useCap)
             return Mathf.Min(cap, penalty);
         return penalty;
@@ -541,7 +582,8 @@ public sealed partial class MapGraphLayoutGenerator
         var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
         var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
         var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
-        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor)
+        var checkWallWall = settings != null && settings.DisallowWallWallOverlap && BoundsOverlap(aWallMinW, aWallMaxW, bWallMinW, bWallMaxW);
+        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor && !checkWallWall)
             return 0f;
 
         var bitsA = GetBitsets(aShape);
@@ -559,6 +601,7 @@ public sealed partial class MapGraphLayoutGenerator
         var floorTotal = 0;
         var aWallTotal = 0;
         var bWallTotal = 0;
+        var wallWallTotal = 0;
 
         if (checkFloorFloor && aFloor != null && bFloor != null)
         {
@@ -579,7 +622,13 @@ public sealed partial class MapGraphLayoutGenerator
             bWallTotal = bWall.CountOverlapsShifted(aFloor, shift);
         }
 
-        if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0)
+        if (checkWallWall && aWall != null && bWall != null)
+        {
+            var shift = (bWall.Min + deltaBA) - aWall.Min;
+            wallWallTotal = aWall.CountOverlapsShifted(bWall, shift);
+        }
+
+        if (floorTotal == 0 && aWallTotal == 0 && bWallTotal == 0 && wallWallTotal == 0)
             return 0f;
 
         TryGetBiteAllowanceRaw(
@@ -593,7 +642,8 @@ public sealed partial class MapGraphLayoutGenerator
             bRoot,
             out var allowedFloor,
             out var allowedWallA,
-            out var allowedWallB);
+            out var allowedWallB,
+            out var allowedWallWall);
 
         var penalty = 0;
 
@@ -613,6 +663,12 @@ public sealed partial class MapGraphLayoutGenerator
         {
             var allowed = allowedWallB.IsEmpty ? 0 : CountAllowedOverlapCells(bWall, bRoot, aFloor, aRoot, allowedWallB);
             penalty += Mathf.Max(0, bWallTotal - allowed);
+        }
+
+        if (wallWallTotal > 0)
+        {
+            var allowed = allowedWallWall.IsEmpty ? 0 : CountAllowedOverlapCells(aWall, aRoot, bWall, bRoot, allowedWallWall);
+            penalty += Mathf.Max(0, wallWallTotal - allowed);
         }
 
         return penalty;
@@ -651,7 +707,8 @@ public sealed partial class MapGraphLayoutGenerator
         var checkFloorFloor = BoundsOverlap(aFloorMinW, aFloorMaxW, bFloorMinW, bFloorMaxW);
         var checkAWallBFloor = BoundsOverlap(aWallMinW, aWallMaxW, bFloorMinW, bFloorMaxW);
         var checkBWallAFloor = BoundsOverlap(bWallMinW, bWallMaxW, aFloorMinW, aFloorMaxW);
-        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor)
+        var checkWallWall = settings != null && settings.DisallowWallWallOverlap && BoundsOverlap(aWallMinW, aWallMaxW, bWallMinW, bWallMaxW);
+        if (!checkFloorFloor && !checkAWallBFloor && !checkBWallAFloor && !checkWallWall)
             return 0f;
 
         var penalty = 0f;
@@ -659,7 +716,7 @@ public sealed partial class MapGraphLayoutGenerator
         // Delta from A-local to B-local overlap checks.
         var deltaBA = b.Root - a.Root;
 
-        TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB);
+        TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB, out var allowedWallWall);
 
         if (checkFloorFloor)
         {
@@ -681,6 +738,9 @@ public sealed partial class MapGraphLayoutGenerator
             var deltaAB = a.Root - b.Root;
             penalty += CountOverlapShifted(bWall, aFloor, deltaAB, allowedWallB, b.Root, out _, earlyStopAtTwo: false);
         }
+
+        if (checkWallWall)
+            penalty += CountOverlapShifted(aWall, bWall, deltaBA, allowedWallWall, a.Root, out _, earlyStopAtTwo: false);
 
         return penalty;
     }

@@ -71,6 +71,10 @@ public sealed partial class MapGraphLayoutGenerator
         // for the remaining unplaced nodes.
         public bool UseCycleClosureBias { get; set; } = true;
 
+        // Geometry rule: if enabled, wall↔wall overlaps are treated as illegal in layout energy,
+        // strict validation, and placement occupancy.
+        public bool DisallowWallWallOverlap { get; set; } = false;
+
         // Internal: absolute realtime deadline for the current layout-generation attempt.
         // <= 0 means no deadline.
         public float LayoutDeadlineRealtime { get; set; } = 0f;
@@ -107,6 +111,7 @@ public sealed partial class MapGraphLayoutGenerator
                 TargetSelectionExplorationProbability = TargetSelectionExplorationProbability,
                 UseBridgeExpansionBias = UseBridgeExpansionBias,
                 UseCycleClosureBias = UseCycleClosureBias,
+                DisallowWallWallOverlap = DisallowWallWallOverlap,
                 LayoutDeadlineRealtime = LayoutDeadlineRealtime,
                 DebugNoLayouts = DebugNoLayouts,
                 DebugNoLayoutsTopPairs = DebugNoLayoutsTopPairs,

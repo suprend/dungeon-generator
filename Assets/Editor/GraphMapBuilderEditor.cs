@@ -196,6 +196,7 @@ public sealed class GraphMapBuilderEditor : Editor
             EditorGUILayout.LabelField("Heuristics", EditorStyles.boldLabel);
             DrawProp(nameof(GraphMapBuilder.useBridgeExpansionBias), "Topology Expansion Bias (Experimental)", "Experimental. Can reduce success rate on real graphs; keep disabled unless you are testing it.");
             DrawProp(nameof(GraphMapBuilder.useCycleClosureBias), "Cycle Closure Bias (Recommended)", "Recommended. Helps cycle-chains stay geometrically closable during initial layout.");
+            DrawProp(nameof(GraphMapBuilder.disallowWallWallOverlap), "Disallow Wall-Wall Overlap", "Treat wall↔wall overlaps as illegal in layout energy, strict validation, and placement. Stricter geometry; may reduce success rate.");
         }
     }
 

@@ -187,6 +187,11 @@ public partial class MapGraphLevelSolver
                 LastError = $"Layout room {placement.Prefab.name} floors overlap existing walls.";
                 return true;
             }
+            if (disallowWallWallOverlap && HasOverlap(placement.WallCells, occupiedWall))
+            {
+                LastError = $"Layout room {placement.Prefab.name} walls overlap existing walls.";
+                return true;
+            }
             return false;
         }
 

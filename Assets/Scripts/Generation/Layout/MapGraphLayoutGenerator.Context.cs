@@ -9,6 +9,9 @@ public sealed partial class MapGraphLayoutGenerator
         public List<MapGraphChainBuilder.Chain> OrderedChains { get; set; }
         public ShapeLibrary ShapeLibrary { get; set; }
         public ConfigurationSpaceLibrary ConfigSpaceLibrary { get; set; }
+        public Dictionary<(string, string), BridgeInfo> BridgeInfoByEdge { get; set; }
+        public Dictionary<(string, string), CycleEdgeGapStats> CycleEdgeGapStatsByEdge { get; set; }
+        public Dictionary<string, NodeTopologyInfo> NodeTopologyInfoById { get; set; }
         public Dictionary<string, List<GameObject>> RoomPrefabLookup { get; set; }
         public Dictionary<string, MapGraphAsset.NodeData> NodeById { get; set; }
         public Dictionary<RoomTypeAsset, List<GameObject>> PrefabsByRoomType { get; set; }

@@ -35,6 +35,11 @@ public sealed partial class MapGraphLayoutGenerator
                 neighborLookupLocal = BuildNeighborLookup(graphAsset);
             }
         }
+        Dictionary<(string, string), BridgeInfo> bridgeInfoLocal = null;
+        Dictionary<(string, string), CycleEdgeGapStats> cycleEdgeGapStatsLocal = null;
+        Dictionary<string, NodeTopologyInfo> nodeTopologyInfoLocal = null;
+        if (settings.UseBridgeExpansionBias)
+            BuildTopologyInfo(graphAsset, out bridgeInfoLocal, out nodeTopologyInfoLocal);
 
         // Keep the existing helper that builds node indices based on the current neighbor lookup.
         neighborLookup = neighborLookupLocal;
@@ -250,6 +255,9 @@ public sealed partial class MapGraphLayoutGenerator
             WarmupBiteOffsetMaps(shapeLib, connectorPrefabsLocal, prefabList);
         }
 
+        if (settings.UseCycleClosureBias)
+            cycleEdgeGapStatsLocal = BuildCycleEdgeGapStats(graphAsset, roomLookup, csLib);
+
         if (settings.LogConfigSpaceSizeSummary && csPairs > 0)
         {
             var avg = csSum / (float)csPairs;
@@ -265,6 +273,9 @@ public sealed partial class MapGraphLayoutGenerator
             OrderedChains = chains,
             ShapeLibrary = shapeLib,
             ConfigSpaceLibrary = csLib,
+            BridgeInfoByEdge = bridgeInfoLocal,
+            CycleEdgeGapStatsByEdge = cycleEdgeGapStatsLocal,
+            NodeTopologyInfoById = nodeTopologyInfoLocal,
             RoomPrefabLookup = roomLookup,
             NodeById = nodeByIdLocal,
             PrefabsByRoomType = prefabsByRoomTypeLocal,
@@ -275,5 +286,72 @@ public sealed partial class MapGraphLayoutGenerator
             NeighborIndicesByIndex = neighborIndicesByIndex
         };
         return true;
+    }
+
+    private Dictionary<(string, string), CycleEdgeGapStats> BuildCycleEdgeGapStats(
+        MapGraphAsset graphAsset,
+        Dictionary<string, List<GameObject>> roomLookup,
+        ConfigurationSpaceLibrary csLib)
+    {
+        var result = new Dictionary<(string, string), CycleEdgeGapStats>();
+        if (graphAsset?.Edges == null || roomLookup == null || csLib == null)
+            return result;
+
+        foreach (var edge in graphAsset.Edges)
+        {
+            if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                continue;
+            if (!roomLookup.TryGetValue(edge.fromNodeId, out var fromPrefabs) || fromPrefabs == null || fromPrefabs.Count == 0)
+                continue;
+            if (!roomLookup.TryGetValue(edge.toNodeId, out var toPrefabs) || toPrefabs == null || toPrefabs.Count == 0)
+                continue;
+
+            var key = MapGraphKey.NormalizeKey(edge.fromNodeId, edge.toNodeId);
+            if (result.ContainsKey(key))
+                continue;
+
+            var minStep = float.MaxValue;
+            var maxStep = 0f;
+            long distanceSum = 0;
+            long distanceCount = 0;
+
+            for (var i = 0; i < fromPrefabs.Count; i++)
+            {
+                var fixedPrefab = fromPrefabs[i];
+                if (fixedPrefab == null)
+                    continue;
+
+                for (var j = 0; j < toPrefabs.Count; j++)
+                {
+                    var movingPrefab = toPrefabs[j];
+                    if (movingPrefab == null)
+                        continue;
+                    if (!csLib.TryGetSpace(fixedPrefab, movingPrefab, out var space, out _))
+                        continue;
+                    var offsets = space?.OffsetsList;
+                    if (offsets == null || offsets.Count == 0)
+                        continue;
+
+                    for (var offsetIndex = 0; offsetIndex < offsets.Count; offsetIndex++)
+                    {
+                        var offset = offsets[offsetIndex];
+                        var step = Mathf.Abs(offset.x) + Mathf.Abs(offset.y);
+                        minStep = Mathf.Min(minStep, step);
+                        maxStep = Mathf.Max(maxStep, step);
+                        distanceSum += step;
+                        distanceCount++;
+                    }
+                }
+            }
+
+            if (minStep == float.MaxValue || maxStep <= 0f)
+                continue;
+
+            var meanStep = distanceCount > 0 ? distanceSum / (float)distanceCount : maxStep;
+            var preferred = Mathf.Lerp(meanStep, maxStep, 0.15f);
+            result[key] = new CycleEdgeGapStats(minStep, preferred, maxStep);
+        }
+
+        return result;
     }
 }

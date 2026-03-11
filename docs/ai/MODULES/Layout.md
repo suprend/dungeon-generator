@@ -21,12 +21,14 @@
 - `AddChain(...)`
   - строит начальную раскладку для chain’а
   - улучшает её через SA (simulated annealing)
+  - при фейле может сделать layout‑retry с новым seed на уровне orchestration solver’а
 - Генерация кандидатов (candidate generation)
   - пересечение CS по уже размещённым соседям
   - fallback “удовлетворить максимум соседей”
 - Энергия (energy)
   - overlap penalty: запрещённые пересечения floor/wall (с исключениями bite/carve)
   - distance penalty: несостыкованные рёбра (CS mismatch) штрафуются квадратом расстояния
+  - topology bias (опционально): bridge/articulation‑эвристика влияет на initial layout и на SA acceptance
 
 ## Перформанс
 
@@ -40,6 +42,16 @@
 Уже применённые оптимизации:
 - инкрементальный energy cache на шагах perturb
 - не делать дорогую полную валидацию на каждом SA‑шаге; валидировать только при сохранении результатов
+- layout retries с разными seed’ами (основная случайность сидит именно в layout/SA)
+- layout time limit относится к одной layout‑попытке, а не к placement/stamping
+- topology‑aware initial layout:
+  - cycle closure bias — рабочая эвристика для `cycle-chain`; по empirical test'ам её лучше держать включённой
+  - topology expansion bias для bridge/articulation — экспериментальная эвристика; по empirical test'ам может ухудшать success rate, поэтому не рекомендуется как дефолт
+  - для `cycle-chain` стартовый score включает cycle closure bias:
+    - допустимый gap берётся из реальных CS‑смещений оставшихся рёбер цикла, а не из размеров room prefab,
+    - два открытых конца цикла не должны становиться слишком близки/слишком далеки для оставшихся узлов,
+    - до поздней стадии замыкания предпочитается более широкий `preferred gap`,
+    - штрафуются слишком близкие почти‑параллельные ветви, выросшие от одного anchor
 
 ## Где что лежит (по файлам)
 

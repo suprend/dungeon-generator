@@ -40,6 +40,7 @@ public sealed partial class MapGraphLayoutGenerator
         public Vector2Int OldRoot { get; }
         public float OldOverlapSum { get; }
         public float OldDistanceSum { get; }
+        public float OldTopologyPenalty { get; }
 
         public MoveUndo(
             string nodeId,
@@ -49,7 +50,8 @@ public sealed partial class MapGraphLayoutGenerator
             ModuleShape oldShape,
             Vector2Int oldRoot,
             float oldOverlapSum,
-            float oldDistanceSum)
+            float oldDistanceSum,
+            float oldTopologyPenalty)
         {
             NodeId = nodeId;
             NodeIndex = nodeIndex;
@@ -59,6 +61,7 @@ public sealed partial class MapGraphLayoutGenerator
             OldRoot = oldRoot;
             OldOverlapSum = oldOverlapSum;
             OldDistanceSum = oldDistanceSum;
+            OldTopologyPenalty = oldTopologyPenalty;
         }
     }
 
@@ -144,6 +147,7 @@ public sealed partial class MapGraphLayoutGenerator
 
         var pChange = Mathf.Clamp01(settings.ChangePrefabProbability);
         var changeShape = rng.NextDouble() < pChange;
+        var oldTopologyPenalty = ComputeLocalTopologyPenalty(energyCache, targetIndex);
 
         List<GameObject> prefabs;
         GameObject newPrefab;
@@ -225,15 +229,16 @@ public sealed partial class MapGraphLayoutGenerator
                     return false;
             }
 
-            undo = new MoveUndo(
-                targetId,
-                targetIndex,
-                targetPlacement,
-                oldPrefab,
-                oldShape,
-                oldRoot,
-                energyCache.OverlapPenaltySum,
-                energyCache.DistancePenaltySum);
+        undo = new MoveUndo(
+            targetId,
+            targetIndex,
+            targetPlacement,
+            oldPrefab,
+            oldShape,
+            oldRoot,
+            energyCache.OverlapPenaltySum,
+            energyCache.DistancePenaltySum,
+            oldTopologyPenalty);
 
             // Mutate in place to avoid per-step allocations in SA.
             targetPlacement.Prefab = newPrefab;
@@ -671,6 +676,151 @@ public sealed partial class MapGraphLayoutGenerator
 
         energyCache.OverlapPenaltySum = overlapSum;
         energyCache.DistancePenaltySum = distSum;
+    }
+
+    private float ComputeLocalTopologyPenalty(EnergyCache energyCache, int changedIndex)
+    {
+        if (settings == null || !settings.UseBridgeExpansionBias || energyCache == null)
+            return 0f;
+        if (changedIndex < 0 || changedIndex >= energyCache.NodeCount || !energyCache.IsPlaced[changedIndex])
+            return 0f;
+        if (bridgeInfoByEdge == null || bridgeInfoByEdge.Count == 0)
+            return 0f;
+        if (neighborIndicesByIndex == null || changedIndex >= neighborIndicesByIndex.Length)
+            return 0f;
+
+        var sum = 0f;
+        var seenPairs = new HashSet<int>();
+
+        AddIncidentBridgePenalties(energyCache, changedIndex, seenPairs, ref sum);
+
+        var directNeighbors = neighborIndicesByIndex[changedIndex];
+        if (directNeighbors != null)
+        {
+            for (var i = 0; i < directNeighbors.Length; i++)
+            {
+                var neighborIndex = directNeighbors[i];
+                if (neighborIndex < 0 || neighborIndex >= energyCache.NodeCount || !energyCache.IsPlaced[neighborIndex])
+                    continue;
+                AddIncidentBridgePenalties(energyCache, neighborIndex, seenPairs, ref sum);
+            }
+        }
+
+        return TopologyWeight * sum;
+    }
+
+    private void AddIncidentBridgePenalties(EnergyCache energyCache, int centerIndex, HashSet<int> seenPairs, ref float sum)
+    {
+        if (energyCache == null || seenPairs == null || centerIndex < 0 || centerIndex >= energyCache.NodeCount)
+            return;
+        if (neighborIndicesByIndex == null || centerIndex >= neighborIndicesByIndex.Length)
+            return;
+
+        var neighbors = neighborIndicesByIndex[centerIndex];
+        if (neighbors == null)
+            return;
+
+        for (var i = 0; i < neighbors.Length; i++)
+        {
+            var otherIndex = neighbors[i];
+            if (otherIndex < 0 || otherIndex >= energyCache.NodeCount || !energyCache.IsPlaced[otherIndex])
+                continue;
+
+            var pairIndex = PairIndex(centerIndex, otherIndex, energyCache.NodeCount);
+            if (pairIndex < 0 || !seenPairs.Add(pairIndex))
+                continue;
+
+            sum += ComputeBridgeTopologyPenalty(energyCache, centerIndex, otherIndex);
+        }
+    }
+
+    private float ComputeBridgeTopologyPenalty(EnergyCache energyCache, int aIndex, int bIndex)
+    {
+        if (energyCache == null || aIndex < 0 || bIndex < 0 || aIndex >= energyCache.NodeCount || bIndex >= energyCache.NodeCount)
+            return 0f;
+
+        var a = energyCache.PlacementsByIndex[aIndex];
+        var b = energyCache.PlacementsByIndex[bIndex];
+        if (a == null || b == null)
+            return 0f;
+
+        if (!bridgeInfoByEdge.TryGetValue(MapGraphKey.NormalizeKey(a.NodeId, b.NodeId), out var bridgeInfo))
+            return 0f;
+
+        return ComputeBridgeEndpointPenalty(energyCache, aIndex, bIndex, bridgeInfo.GetSideSize(b.NodeId)) +
+               ComputeBridgeEndpointPenalty(energyCache, bIndex, aIndex, bridgeInfo.GetSideSize(a.NodeId));
+    }
+
+    private float ComputeBridgeEndpointPenalty(EnergyCache energyCache, int centerIndex, int bridgeOtherIndex, int oppositeComponentSize)
+    {
+        if (energyCache == null || centerIndex < 0 || bridgeOtherIndex < 0 || centerIndex >= energyCache.NodeCount || bridgeOtherIndex >= energyCache.NodeCount)
+            return 0f;
+
+        var centerPlacement = energyCache.PlacementsByIndex[centerIndex];
+        var otherPlacement = energyCache.PlacementsByIndex[bridgeOtherIndex];
+        if (centerPlacement == null || otherPlacement == null)
+            return 0f;
+
+        if (!TryGetLocalNeighborCentroid(energyCache, centerIndex, bridgeOtherIndex, out var localCentroid))
+            return 0f;
+
+        var center = (Vector2)centerPlacement.Root;
+        var desiredOutward = center - localCentroid;
+        if (desiredOutward.sqrMagnitude <= 0.001f)
+            return 0f;
+
+        var bridgeDir = (Vector2)otherPlacement.Root - center;
+        if (bridgeDir.sqrMagnitude <= 0.001f)
+            return 0f;
+
+        var inwardProjection = Vector2.Dot(bridgeDir, -desiredOutward.normalized);
+        if (inwardProjection <= 0f)
+            return 0f;
+
+        var scale = 1f + 0.12f * Mathf.Min(12, Mathf.Max(0, oppositeComponentSize - 1));
+        if (nodeTopologyInfoById != null && nodeIdByIndex != null && centerIndex < nodeIdByIndex.Length)
+        {
+            var centerNodeId = nodeIdByIndex[centerIndex];
+            if (!string.IsNullOrEmpty(centerNodeId) && nodeTopologyInfoById.TryGetValue(centerNodeId, out var info))
+                scale += info.Priority * 0.05f;
+        }
+
+        return Mathf.Clamp(inwardProjection, 0f, 12f) * scale;
+    }
+
+    private bool TryGetLocalNeighborCentroid(EnergyCache energyCache, int centerIndex, int excludedNeighborIndex, out Vector2 centroid)
+    {
+        centroid = Vector2.zero;
+        if (energyCache == null || centerIndex < 0 || centerIndex >= energyCache.NodeCount)
+            return false;
+        if (neighborIndicesByIndex == null || centerIndex >= neighborIndicesByIndex.Length)
+            return false;
+
+        var neighbors = neighborIndicesByIndex[centerIndex];
+        if (neighbors == null || neighbors.Length == 0)
+            return false;
+
+        var sum = Vector2.zero;
+        var count = 0;
+        for (var i = 0; i < neighbors.Length; i++)
+        {
+            var neighborIndex = neighbors[i];
+            if (neighborIndex == excludedNeighborIndex || neighborIndex < 0 || neighborIndex >= energyCache.NodeCount || !energyCache.IsPlaced[neighborIndex])
+                continue;
+
+            var placement = energyCache.PlacementsByIndex[neighborIndex];
+            if (placement == null)
+                continue;
+
+            sum += placement.Root;
+            count++;
+        }
+
+        if (count <= 0)
+            return false;
+
+        centroid = sum / count;
+        return true;
     }
 
     private void UndoMove(

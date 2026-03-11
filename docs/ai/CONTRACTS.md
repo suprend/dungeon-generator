@@ -83,14 +83,30 @@
 
 **Контракт**
 - `randomSeed != 0`: ожидание детерминизма в рамках алгоритма (при прочих равных и без внешних источников рандома).
-- `randomSeed == 0`: seed выбирается случайно; для фейлов допускаются несколько попыток с разными seed’ами (если включено).
+- `randomSeed == 0`: базовый seed выбирается случайно.
+- `layoutRetries >= 1`: layout может быть перезапущен несколько раз; каждая попытка использует `baseSeed + attemptIndex`.
+- `layoutTimeLimitSeconds` относится к **одной попытке layout generation** (`GetInitialLayout` + stack search + SA), а не ко всему пайплайну placement/stamping.
 
 **Код‑якоря**
 - `Assets/Scripts/Generation/Solve/MapGraphLevelSolver.LayoutWorkflow.cs` (`TrySolveAndPlaceWithLayout`).
 
-## 7) Non‑features (важно не “придумывать”)
+## 7) Chains / декомпозиция графа
+
+**Контракт**
+- Chain в layout — это не произвольный подграф, а почти всегда **максимальный подграф степени `<= 2`**:
+  - либо `path-chain`,
+  - либо `simple cycle`,
+  - либо singleton для изолированной вершины.
+- Простые face’ы превращаются в `cycle-chain`.
+- Оставшиеся рёбра раскладываются в path-chain’ы по узлам степени `!= 2`; остатки из degree‑2 компонентов становятся cycle-chain’ами.
+- Следствие: основное ветвление поиска возникает **между chain’ами**, а не внутри одной chain.
+
+**Код‑якоря**
+- `Assets/Scripts/Generation/Graph/MapGraphChainBuilder.cs`
+- `Assets/Scripts/Generation/Layout/MapGraphLayoutGenerator.ChainPlacement.cs` (`BuildChainBfsOrder`, `GetInitialLayout`, `AddChain`)
+
+## 8) Non‑features (важно не “придумывать”)
 
 - Door width > 1 не поддерживается.
 - Автоматическое ограничение “один сокет на span” не поддерживается (SpanId — метка).
 - Room↔Room и Connector↔Connector связи после expansion не поддерживаются (по дизайну).
-

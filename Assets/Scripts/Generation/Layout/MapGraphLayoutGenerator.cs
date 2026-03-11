@@ -64,6 +64,13 @@ public sealed partial class MapGraphLayoutGenerator
         public int TargetSelectionTournamentK { get; set; } = 4;
         public float TargetSelectionExplorationProbability { get; set; } = 0.15f;
 
+        // Heuristic: for graph bridges/articulation points, prefer placing critical branches farther away from the current cluster.
+        public bool UseBridgeExpansionBias { get; set; } = false;
+
+        // Heuristic: for cycle-chains, keep the two open ends at a distance that remains closable
+        // for the remaining unplaced nodes.
+        public bool UseCycleClosureBias { get; set; } = true;
+
         // Internal: absolute realtime deadline for the current layout-generation attempt.
         // <= 0 means no deadline.
         public float LayoutDeadlineRealtime { get; set; } = 0f;
@@ -98,6 +105,8 @@ public sealed partial class MapGraphLayoutGenerator
                 UseConflictDrivenTargetSelection = UseConflictDrivenTargetSelection,
                 TargetSelectionTournamentK = TargetSelectionTournamentK,
                 TargetSelectionExplorationProbability = TargetSelectionExplorationProbability,
+                UseBridgeExpansionBias = UseBridgeExpansionBias,
+                UseCycleClosureBias = UseCycleClosureBias,
                 LayoutDeadlineRealtime = LayoutDeadlineRealtime,
                 DebugNoLayouts = DebugNoLayouts,
                 DebugNoLayoutsTopPairs = DebugNoLayoutsTopPairs,
@@ -170,6 +179,9 @@ public sealed partial class MapGraphLayoutGenerator
     private ConfigurationSpaceLibrary configSpaceLibrary;
     private MapGraphAsset graphAsset;
     private List<MapGraphChainBuilder.Chain> orderedChains;
+    private Dictionary<(string, string), BridgeInfo> bridgeInfoByEdge;
+    private Dictionary<(string, string), CycleEdgeGapStats> cycleEdgeGapStatsByEdge;
+    private Dictionary<string, NodeTopologyInfo> nodeTopologyInfoById;
     private Dictionary<string, List<GameObject>> roomPrefabLookup;
     private Dictionary<string, MapGraphAsset.NodeData> nodeById;
     private Dictionary<RoomTypeAsset, List<GameObject>> prefabsByRoomType;
@@ -212,6 +224,85 @@ public sealed partial class MapGraphLayoutGenerator
     }
 
     private LayoutProfiling profiling;
+
+    private readonly struct CycleEdgeGapStats
+    {
+        public float MinStep { get; }
+        public float PreferredStep { get; }
+        public float MaxStep { get; }
+
+        public CycleEdgeGapStats(float minStep, float preferredStep, float maxStep)
+        {
+            MinStep = Mathf.Max(1f, minStep);
+            PreferredStep = Mathf.Clamp(preferredStep, MinStep, Mathf.Max(MinStep, maxStep));
+            MaxStep = Mathf.Max(PreferredStep, maxStep);
+        }
+    }
+
+    private readonly struct BridgeInfo
+    {
+        public string FromNodeId { get; }
+        public string ToNodeId { get; }
+        public int FromSideSize { get; }
+        public int ToSideSize { get; }
+
+        public BridgeInfo(string fromNodeId, string toNodeId, int fromSideSize, int toSideSize)
+        {
+            FromNodeId = fromNodeId;
+            ToNodeId = toNodeId;
+            FromSideSize = fromSideSize;
+            ToSideSize = toSideSize;
+        }
+
+        public int GetSideSize(string nodeId)
+        {
+            if (string.Equals(nodeId, FromNodeId, StringComparison.Ordinal))
+                return FromSideSize;
+            if (string.Equals(nodeId, ToNodeId, StringComparison.Ordinal))
+                return ToSideSize;
+            return 0;
+        }
+    }
+
+    private readonly struct NodeTopologyInfo
+    {
+        public bool IsArticulation { get; }
+        public int SplitComponentCount { get; }
+        public int MaxSeparatedComponentSize { get; }
+        public int IncidentBridgeCount { get; }
+        public int MaxIncidentBridgeComponentSize { get; }
+        public float Priority { get; }
+
+        public NodeTopologyInfo(
+            bool isArticulation,
+            int splitComponentCount,
+            int maxSeparatedComponentSize,
+            int incidentBridgeCount,
+            int maxIncidentBridgeComponentSize)
+        {
+            IsArticulation = isArticulation;
+            SplitComponentCount = splitComponentCount;
+            MaxSeparatedComponentSize = maxSeparatedComponentSize;
+            IncidentBridgeCount = incidentBridgeCount;
+            MaxIncidentBridgeComponentSize = maxIncidentBridgeComponentSize;
+            Priority =
+                (isArticulation ? 4f : 0f) +
+                Mathf.Max(0, splitComponentCount - 1) * 2f +
+                maxSeparatedComponentSize * 0.2f +
+                incidentBridgeCount * 1.5f +
+                maxIncidentBridgeComponentSize * 0.1f;
+        }
+
+        public NodeTopologyInfo WithBridgeStats(int incidentBridgeCount, int maxIncidentBridgeComponentSize)
+        {
+            return new NodeTopologyInfo(
+                IsArticulation,
+                SplitComponentCount,
+                MaxSeparatedComponentSize,
+                incidentBridgeCount,
+                maxIncidentBridgeComponentSize);
+        }
+    }
 
     private static long NowTicks() => Stopwatch.GetTimestamp();
     private static double TicksToMs(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
@@ -256,6 +347,9 @@ public sealed partial class MapGraphLayoutGenerator
         orderedChains = ctx.OrderedChains;
         shapeLibrary = ctx.ShapeLibrary;
         configSpaceLibrary = ctx.ConfigSpaceLibrary;
+        bridgeInfoByEdge = ctx.BridgeInfoByEdge;
+        cycleEdgeGapStatsByEdge = ctx.CycleEdgeGapStatsByEdge;
+        nodeTopologyInfoById = ctx.NodeTopologyInfoById;
         roomPrefabLookup = ctx.RoomPrefabLookup;
         nodeById = ctx.NodeById;
         prefabsByRoomType = ctx.PrefabsByRoomType;
@@ -289,6 +383,183 @@ public sealed partial class MapGraphLayoutGenerator
         }
 
         return map;
+    }
+
+    private static void BuildTopologyInfo(
+        MapGraphAsset graphAsset,
+        out Dictionary<(string, string), BridgeInfo> bridgeInfoByEdge,
+        out Dictionary<string, NodeTopologyInfo> nodeTopologyInfoById)
+    {
+        var result = new Dictionary<(string, string), BridgeInfo>();
+        var nodeInfo = new Dictionary<string, NodeTopologyInfo>();
+        if (graphAsset == null)
+        {
+            bridgeInfoByEdge = result;
+            nodeTopologyInfoById = nodeInfo;
+            return;
+        }
+
+        var adjacency = new Dictionary<string, List<string>>();
+        void EnsureNode(string id)
+        {
+            if (string.IsNullOrEmpty(id) || adjacency.ContainsKey(id))
+                return;
+            adjacency[id] = new List<string>();
+            nodeInfo[id] = default;
+        }
+
+        if (graphAsset.Nodes != null)
+        {
+            foreach (var node in graphAsset.Nodes)
+                EnsureNode(node?.id);
+        }
+
+        if (graphAsset.Edges != null)
+        {
+            foreach (var edge in graphAsset.Edges)
+            {
+                if (edge == null || string.IsNullOrEmpty(edge.fromNodeId) || string.IsNullOrEmpty(edge.toNodeId))
+                    continue;
+
+                EnsureNode(edge.fromNodeId);
+                EnsureNode(edge.toNodeId);
+                adjacency[edge.fromNodeId].Add(edge.toNodeId);
+                adjacency[edge.toNodeId].Add(edge.fromNodeId);
+            }
+        }
+
+        var discovered = new Dictionary<string, int>(adjacency.Count);
+        var low = new Dictionary<string, int>(adjacency.Count);
+        var subtreeSize = new Dictionary<string, int>(adjacency.Count);
+        var componentVisited = new HashSet<string>();
+        var time = 0;
+
+        void DfsBridge(string nodeId, string parentId, int componentSize)
+        {
+            time++;
+            discovered[nodeId] = time;
+            low[nodeId] = time;
+            subtreeSize[nodeId] = 1;
+            var childCount = 0;
+            var separatedSizes = new List<int>();
+
+            if (!adjacency.TryGetValue(nodeId, out var neighbors))
+                return;
+
+            for (var i = 0; i < neighbors.Count; i++)
+            {
+                var otherId = neighbors[i];
+                if (string.Equals(otherId, parentId, StringComparison.Ordinal))
+                    continue;
+
+                if (!discovered.ContainsKey(otherId))
+                {
+                    childCount++;
+                    DfsBridge(otherId, nodeId, componentSize);
+                    subtreeSize[nodeId] += subtreeSize[otherId];
+                    low[nodeId] = Mathf.Min(low[nodeId], low[otherId]);
+
+                    if (low[otherId] >= discovered[nodeId])
+                        separatedSizes.Add(subtreeSize[otherId]);
+
+                    if (low[otherId] > discovered[nodeId])
+                    {
+                        var key = MapGraphKey.NormalizeKey(nodeId, otherId);
+                        result[key] = new BridgeInfo(
+                            nodeId,
+                            otherId,
+                            Mathf.Max(1, componentSize - subtreeSize[otherId]),
+                            Mathf.Max(1, subtreeSize[otherId]));
+                    }
+                }
+                else
+                {
+                    low[nodeId] = Mathf.Min(low[nodeId], discovered[otherId]);
+                }
+            }
+
+            var isRoot = string.IsNullOrEmpty(parentId);
+            var isArticulation = isRoot ? childCount > 1 : separatedSizes.Count > 0;
+            if (!isArticulation)
+                return;
+
+            var separatedTotal = 0;
+            var maxSeparated = 0;
+            for (var i = 0; i < separatedSizes.Count; i++)
+            {
+                var size = separatedSizes[i];
+                separatedTotal += size;
+                if (size > maxSeparated)
+                    maxSeparated = size;
+            }
+
+            var remainder = Mathf.Max(0, componentSize - 1 - separatedTotal);
+            if (remainder > 0)
+                maxSeparated = Mathf.Max(maxSeparated, remainder);
+
+            var splitComponentCount = separatedSizes.Count + (remainder > 0 ? 1 : 0);
+            if (isRoot && splitComponentCount == 0 && childCount > 1)
+                splitComponentCount = childCount;
+
+            nodeInfo[nodeId] = new NodeTopologyInfo(
+                true,
+                Mathf.Max(2, splitComponentCount),
+                Mathf.Max(1, maxSeparated),
+                0,
+                0);
+        }
+
+        foreach (var nodeId in adjacency.Keys)
+        {
+            if (componentVisited.Contains(nodeId))
+                continue;
+
+            var stack = new Stack<string>();
+            var componentNodes = new List<string>();
+            stack.Push(nodeId);
+            componentVisited.Add(nodeId);
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                componentNodes.Add(current);
+                if (!adjacency.TryGetValue(current, out var neighbors))
+                    continue;
+                for (var i = 0; i < neighbors.Count; i++)
+                {
+                    var otherId = neighbors[i];
+                    if (componentVisited.Add(otherId))
+                        stack.Push(otherId);
+                }
+            }
+
+            var componentSize = componentNodes.Count;
+            for (var i = 0; i < componentNodes.Count; i++)
+            {
+                var startNodeId = componentNodes[i];
+                if (!discovered.ContainsKey(startNodeId))
+                    DfsBridge(startNodeId, null, componentSize);
+            }
+        }
+
+        foreach (var kv in result)
+        {
+            var bridge = kv.Value;
+
+            if (!nodeInfo.TryGetValue(bridge.FromNodeId, out var fromInfo))
+                fromInfo = default;
+            nodeInfo[bridge.FromNodeId] = fromInfo.WithBridgeStats(
+                fromInfo.IncidentBridgeCount + 1,
+                Mathf.Max(fromInfo.MaxIncidentBridgeComponentSize, bridge.ToSideSize));
+
+            if (!nodeInfo.TryGetValue(bridge.ToNodeId, out var toInfo))
+                toInfo = default;
+            nodeInfo[bridge.ToNodeId] = toInfo.WithBridgeStats(
+                toInfo.IncidentBridgeCount + 1,
+                Mathf.Max(toInfo.MaxIncidentBridgeComponentSize, bridge.FromSideSize));
+        }
+
+        bridgeInfoByEdge = result;
+        nodeTopologyInfoById = nodeInfo;
     }
 
     private void BuildNodeIndexAndAdjacency(MapGraphAsset graphAsset)

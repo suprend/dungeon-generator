@@ -39,7 +39,7 @@ public class GraphMapBuilder : MonoBehaviour
     public int maxWiggleCandidates = 16;
     public int maxFallbackCandidates = 256;
     [FormerlySerializedAs("layoutAttempts")]
-    [Tooltip("How many different random seeds to try for layout generation. Used only when randomSeed == 0.")]
+    [Tooltip("How many layout seeds to try. Each retry uses seed+attemptIndex; with Seed=0 the base seed is random.")]
     public int layoutRetries = 1;
     [Tooltip("Log configuration space (CS) offsets counts for prefab pairs during layout generation.")]
     public bool logConfigSpaceSizeSummary = false;
@@ -62,6 +62,10 @@ public class GraphMapBuilder : MonoBehaviour
     [Range(0f, 1f)]
     [Tooltip("Chance to ignore conflict-driven selection and pick a random target (exploration).")]
     public float targetSelectionExplorationProbability = 0.15f;
+    [Tooltip("Experimental. For graph bridges and articulation points, prefer growing critical branches away from the current cluster. Can reduce success rate on real graphs.")]
+    public bool useBridgeExpansionBias = false;
+    [Tooltip("Recommended. For cycle-chains, keep the two open ends at a geometrically closable distance during initial layout.")]
+    public bool useCycleClosureBias = true;
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -115,6 +119,8 @@ public class GraphMapBuilder : MonoBehaviour
             UseConflictDrivenTargetSelection = useConflictDrivenTargetSelection,
             TargetSelectionTournamentK = targetSelectionTournamentK,
             TargetSelectionExplorationProbability = targetSelectionExplorationProbability,
+            UseBridgeExpansionBias = useBridgeExpansionBias,
+            UseCycleClosureBias = useCycleClosureBias,
             DebugNoLayouts = debugNoLayouts,
             DebugNoLayoutsTopPairs = debugNoLayoutsTopPairs,
             DebugNoLayoutsTopEdges = debugNoLayoutsTopEdges

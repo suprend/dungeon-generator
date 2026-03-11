@@ -34,6 +34,8 @@ public sealed class GraphMapBuilderEditor : Editor
         public bool UseConflictDrivenTargetSelection { get; }
         public int TargetSelectionTournamentK { get; }
         public float TargetSelectionExplorationProbability { get; }
+        public bool UseBridgeExpansionBias { get; }
+        public bool UseCycleClosureBias { get; }
 
         public LayoutPreset(
             string name,
@@ -52,7 +54,9 @@ public sealed class GraphMapBuilderEditor : Editor
             int overlapPenaltyCapSlack,
             bool useConflictDrivenTargetSelection,
             int targetSelectionTournamentK,
-            float targetSelectionExplorationProbability)
+            float targetSelectionExplorationProbability,
+            bool useBridgeExpansionBias,
+            bool useCycleClosureBias)
         {
             Name = name;
             LayoutTimeLimitSeconds = layoutTimeLimitSeconds;
@@ -71,6 +75,8 @@ public sealed class GraphMapBuilderEditor : Editor
             UseConflictDrivenTargetSelection = useConflictDrivenTargetSelection;
             TargetSelectionTournamentK = targetSelectionTournamentK;
             TargetSelectionExplorationProbability = targetSelectionExplorationProbability;
+            UseBridgeExpansionBias = useBridgeExpansionBias;
+            UseCycleClosureBias = useCycleClosureBias;
         }
     }
 
@@ -185,6 +191,11 @@ public sealed class GraphMapBuilderEditor : Editor
                 DrawProp(nameof(GraphMapBuilder.targetSelectionTournamentK), "Target Tournament K", "How many random nodes to compare per step (2–8). Higher focuses more on worst nodes.");
                 DrawProp(nameof(GraphMapBuilder.targetSelectionExplorationProbability), "Target Exploration Probability", "Chance to ignore the conflict score and pick a random node (helps avoid local minima).");
             }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Heuristics", EditorStyles.boldLabel);
+            DrawProp(nameof(GraphMapBuilder.useBridgeExpansionBias), "Topology Expansion Bias (Experimental)", "Experimental. Can reduce success rate on real graphs; keep disabled unless you are testing it.");
+            DrawProp(nameof(GraphMapBuilder.useCycleClosureBias), "Cycle Closure Bias (Recommended)", "Recommended. Helps cycle-chains stay geometrically closable during initial layout.");
         }
     }
 
@@ -193,7 +204,7 @@ public sealed class GraphMapBuilderEditor : Editor
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             EditorGUILayout.LabelField("Presets", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("Applies SA parameters plus layout timeout/retry count. Does not change debug flags.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Applies SA parameters plus layout timeout/retry count. Presets keep Cycle Closure Bias on and Topology Expansion Bias off. Does not change debug flags.", EditorStyles.wordWrappedMiniLabel);
 
             var presets = new[]
             {
@@ -214,7 +225,9 @@ public sealed class GraphMapBuilderEditor : Editor
                     overlapPenaltyCapSlack: 64,
                     useConflictDrivenTargetSelection: true,
                     targetSelectionTournamentK: 4,
-                    targetSelectionExplorationProbability: 0.15f),
+                    targetSelectionExplorationProbability: 0.15f,
+                    useBridgeExpansionBias: false,
+                    useCycleClosureBias: true),
                 new LayoutPreset(
                     name: "Fast (Exp)",
                     layoutTimeLimitSeconds: 0.3f,
@@ -232,7 +245,9 @@ public sealed class GraphMapBuilderEditor : Editor
                     overlapPenaltyCapSlack: 64,
                     useConflictDrivenTargetSelection: true,
                     targetSelectionTournamentK: 4,
-                    targetSelectionExplorationProbability: 0.15f),
+                    targetSelectionExplorationProbability: 0.15f,
+                    useBridgeExpansionBias: false,
+                    useCycleClosureBias: true),
                 new LayoutPreset(
                     name: "Slow",
                     layoutTimeLimitSeconds: 0.5f,
@@ -250,7 +265,9 @@ public sealed class GraphMapBuilderEditor : Editor
                     overlapPenaltyCapSlack: 64,
                     useConflictDrivenTargetSelection: true,
                     targetSelectionTournamentK: 4,
-                    targetSelectionExplorationProbability: 0.15f),
+                    targetSelectionExplorationProbability: 0.15f,
+                    useBridgeExpansionBias: false,
+                    useCycleClosureBias: true),
             };
 
             using (new EditorGUILayout.HorizontalScope())
@@ -289,6 +306,8 @@ public sealed class GraphMapBuilderEditor : Editor
             builder.useConflictDrivenTargetSelection = preset.UseConflictDrivenTargetSelection;
             builder.targetSelectionTournamentK = preset.TargetSelectionTournamentK;
             builder.targetSelectionExplorationProbability = preset.TargetSelectionExplorationProbability;
+            builder.useBridgeExpansionBias = preset.UseBridgeExpansionBias;
+            builder.useCycleClosureBias = preset.UseCycleClosureBias;
             MarkDirty(builder);
         }
     }

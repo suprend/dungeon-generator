@@ -153,7 +153,7 @@ public sealed partial class MapGraphLayoutGenerator
             return false;
 
         var deltaBA = b.Root - a.Root;
-        TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB);
+        TryGetBiteAllowance(a, b, out var allowedFloor, out var allowedWallA, out var allowedWallB, out _);
 
         if (settings != null && settings.UseBitsetOverlap)
         {

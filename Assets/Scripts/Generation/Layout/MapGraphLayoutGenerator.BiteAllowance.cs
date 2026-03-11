@@ -220,7 +220,8 @@ public sealed partial class MapGraphLayoutGenerator
         RoomPlacement b,
         out AllowedWorldCells allowedFloorOverlap,
         out AllowedWorldCells allowedWallAOnFloorB,
-        out AllowedWorldCells allowedWallBOnFloorA)
+        out AllowedWorldCells allowedWallBOnFloorA,
+        out AllowedWorldCells allowedWallWallOverlap)
     {
         using var _ps = PS(S_GetBiteAllowance);
         // Returns “legal overlap” sets for a placed Room↔Connector pair that are neighbors in the graph.
@@ -235,6 +236,7 @@ public sealed partial class MapGraphLayoutGenerator
         allowedFloorOverlap = AllowedWorldCells.None;
         allowedWallAOnFloorB = AllowedWorldCells.None;
         allowedWallBOnFloorA = AllowedWorldCells.None;
+        allowedWallWallOverlap = AllowedWorldCells.None;
 
         if (a == null || b == null)
             return false;
@@ -255,6 +257,7 @@ public sealed partial class MapGraphLayoutGenerator
 
         allowedFloorOverlap = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 1);
         var allowedConnectorWalls = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 2);
+        allowedWallWallOverlap = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 3);
         if (aIsConnector)
             allowedWallAOnFloorB = allowedConnectorWalls;
         else
@@ -282,11 +285,13 @@ public sealed partial class MapGraphLayoutGenerator
         Vector2Int bRoot,
         out AllowedWorldCells allowedFloorOverlap,
         out AllowedWorldCells allowedWallAOnFloorB,
-        out AllowedWorldCells allowedWallBOnFloorA)
+        out AllowedWorldCells allowedWallBOnFloorA,
+        out AllowedWorldCells allowedWallWallOverlap)
     {
         allowedFloorOverlap = AllowedWorldCells.None;
         allowedWallAOnFloorB = AllowedWorldCells.None;
         allowedWallBOnFloorA = AllowedWorldCells.None;
+        allowedWallWallOverlap = AllowedWorldCells.None;
 
         if (string.IsNullOrEmpty(aNodeId) || string.IsNullOrEmpty(bNodeId))
             return false;
@@ -314,6 +319,7 @@ public sealed partial class MapGraphLayoutGenerator
 
         allowedFloorOverlap = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 1);
         var allowedConnectorWalls = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 2);
+        allowedWallWallOverlap = AllowedWorldCells.Rays(baseCell, inward, tangent, maxK, rayMask: 3);
         if (aIsConnector)
             allowedWallAOnFloorB = allowedConnectorWalls;
         else

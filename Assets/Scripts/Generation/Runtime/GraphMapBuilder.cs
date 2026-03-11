@@ -66,6 +66,8 @@ public class GraphMapBuilder : MonoBehaviour
     public bool useBridgeExpansionBias = false;
     [Tooltip("Recommended. For cycle-chains, keep the two open ends at a geometrically closable distance during initial layout.")]
     public bool useCycleClosureBias = true;
+    [Tooltip("If enabled, wall↔wall overlaps are treated as illegal during layout and placement. This is stricter and may reduce success rate.")]
+    public bool disallowWallWallOverlap = false;
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -121,6 +123,7 @@ public class GraphMapBuilder : MonoBehaviour
             TargetSelectionExplorationProbability = targetSelectionExplorationProbability,
             UseBridgeExpansionBias = useBridgeExpansionBias,
             UseCycleClosureBias = useCycleClosureBias,
+            DisallowWallWallOverlap = disallowWallWallOverlap,
             DebugNoLayouts = debugNoLayouts,
             DebugNoLayoutsTopPairs = debugNoLayoutsTopPairs,
             DebugNoLayoutsTopEdges = debugNoLayoutsTopEdges

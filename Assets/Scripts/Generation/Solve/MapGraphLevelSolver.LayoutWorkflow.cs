@@ -157,7 +157,17 @@ public partial class MapGraphLevelSolver
                 var ordered = precomputedChains;
                 var rngLocal = new System.Random(attemptSeed);
 
-                var placer = new PlacementState(stamp, rngLocal, verboseLogs, startCell, totalStartTime, 0f, expandedGraph.Nodes.Count, shapeLibrary, configSpaceLibrary);
+                var placer = new PlacementState(
+                    stamp,
+                    rngLocal,
+                    verboseLogs,
+                    startCell,
+                    totalStartTime,
+                    0f,
+                    attemptLayoutSettings.DisallowWallWallOverlap,
+                    expandedGraph.Nodes.Count,
+                    shapeLibrary,
+                    configSpaceLibrary);
                 if (clearMaps)
                     stamp.ClearMaps();
 

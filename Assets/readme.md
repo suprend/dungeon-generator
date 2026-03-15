@@ -84,10 +84,28 @@ README описывает **полный алгоритм** из двух ста
 11) **Placement из layout** (`PlacementState.PlaceFromLayout`):
    - инстанцирует префабы в сцене и выравнивает по `root` (Grid),
    - применяет carve-mask (1.3.1) на коннекторах (carve по 3 дорожкам до глубины `X`),
-   - делает финальные проверки пересечений (строгая валидность) и коммитит в occupancy state.
+   - делает финальные проверки пересечений (строгая валидность) и коммитит в occupancy state,
+   - собирает `GeneratedRoomInfo` для каждой размещённой комнаты/коннектора, чтобы runtime мог знать spawn point и “в какой комнате находится игрок” даже после удаления временных инстансов.
 12) **Stamp в Tilemap** (`TileStampService`):
    - ставит floor/walls тайлы,
    - может отключать renderers у инстансов и/или удалять инстансы после bake.
+13) **Runtime orchestration** (`GraphMapBuilder` + `GeneratedLevelRuntime`):
+   - `GraphMapBuilder` отвечает только за generation/build и публикует `LastGeneratedRooms`,
+   - `GeneratedLevelRuntime` поверх этих данных собирает lookup `floor cell -> generated area` (обычная комната или connector),
+   - если на room prefab есть `StartRoomSpawn`, его `Transform` считается runtime spawn point,
+   - при включённом `Spawn Player After Build` и наличии `playerPrefab` игрок спавнится по первому `GeneratedRoomInfo` с `IsStartRoom=true`,
+   - если задан `Cinemachine Camera`, после спавна игрока `GeneratedLevelRuntime` автоматически назначает ему только `Follow`.
+14) **Player room tracking**:
+   - `PlayerRoomTracker` можно повесить на игрока,
+   - он периодически опрашивает `GeneratedLevelRuntime.TryGetRoomAtWorldPosition(...)`,
+   - хранит `CurrentRoomNodeId`, `PreviousRoomNodeId`, `LastKnownRoomNodeId`; если игрок стоит в connector, tracker вернёт именно connector,
+   - и кидает события `OnEnteredRoom` / `OnExitedRoom`.
+15) **Fog of war по комнатам**:
+   - `RoomFogController` можно повесить на отдельный scene object,
+   - он строит fog overlay по `GeneratedLevelRuntime.LastGeneratedRooms`,
+   - при `Cover Connectors=true` fog ставится и на connector’ы,
+   - при входе игрока в комнату запускает reveal-анимацию от позиции игрока,
+   - визуально это делается через временный fog overlay tilemap и shader `Custom/RoomFogReveal2D`, после чего fog tiles комнаты удаляются из основного `FogMap`.
 
 Логи:
 - `[MapGraphLevelSolver] Timings (s): precompute=... solve=... layout=... place=... stamp=... total=...` — разрез по стадиям.

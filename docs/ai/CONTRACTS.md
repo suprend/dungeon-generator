@@ -26,10 +26,12 @@
 - Сокеты: `DoorSocket` (сторона `DoorSide` + позиция в центре клетки Grid).
 - `DoorSocket.Width` сейчас фактически **не поддерживается** (всегда 1).
 - `DoorSocket.SpanId` — authoring/diagnostics; solver **не** накладывает автоматическое ограничение “один сокет на span”.
+- Если room prefab должен уметь принимать игрока, на нём можно разместить `StartRoomSpawn`; его `Transform` используется как runtime spawn point после генерации.
 
 **Код‑якоря**
 - `Assets/Scripts/Modules/DoorSocket.cs`
 - `Assets/Scripts/Modules/RoomMeta.cs`, `Assets/Scripts/Modules/ConnectorMeta.cs`
+- `Assets/Scripts/Modules/StartRoomSpawn.cs`
 - `Assets/Scripts/Generation/Geometry/ShapeLibrary.cs` (как socket cell трактуется как floor‑capable)
 
 ## 3) Bite depth (стыковка на глубине `X`)

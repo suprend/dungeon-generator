@@ -148,7 +148,6 @@ public sealed class GraphMapBuilderEditor : Editor
             DrawProp(nameof(GraphMapBuilder.runOnStart), "Run On Start", "Automatically run Build() on Awake().");
             DrawProp(nameof(GraphMapBuilder.clearOnRun), "Clear On Run", "Clear tilemaps before stamping.");
             DrawProp(nameof(GraphMapBuilder.destroyPlacedInstances), "Destroy Placed Instances", "After stamping, destroy instantiated prefabs (keeps only tiles).");
-
             EditorGUILayout.Space(4);
             DrawProp(nameof(GraphMapBuilder.layoutTimeLimitSeconds), "Layout Time Limit (s)", "Time limit for one layout-generation try (SA/stack search). 0 = unlimited.");
             DrawProp(nameof(GraphMapBuilder.randomSeed), "Seed", "0 = random per attempt; non-zero = deterministic.");

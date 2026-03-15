@@ -299,6 +299,29 @@ public partial class MapGraphLevelSolver
                 placedNodes[nodeId] = placement;
         }
 
+        private void RecordGeneratedRoom(string nodeId, Placement placement)
+        {
+            if (placement?.Meta == null)
+                return;
+
+            var isConnector = placement.Meta is ConnectorMeta;
+            var startMarker = isConnector ? null : placement.Meta.GetComponentInChildren<StartRoomSpawn>(true);
+            var spawnWorldPosition = startMarker != null ? startMarker.SpawnPoint.position : placement.Meta.transform.position;
+            var allCells = placement.FloorCells.Concat(placement.WallCells);
+            var bounds = GeneratedRoomInfo.ComputeBounds(allCells);
+
+            generatedRooms.Add(new GeneratedRoomInfo(
+                nodeId,
+                placement.Prefab != null ? placement.Prefab.name : placement.Meta.gameObject.name,
+                isConnector,
+                startMarker != null,
+                placement.RootCell,
+                bounds,
+                spawnWorldPosition,
+                placement.FloorCells,
+                placement.WallCells));
+        }
+
         public void StampAll(bool disableRenderers = true)
         {
             foreach (var placement in placementStack)
@@ -335,6 +358,7 @@ public partial class MapGraphLevelSolver
             placedNodes.Clear();
             occupiedFloor.Clear();
             occupiedWall.Clear();
+            generatedRooms.Clear();
         }
 
         private void Log(string msg)

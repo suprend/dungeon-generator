@@ -88,6 +88,7 @@ public partial class MapGraphLevelSolver
 
         try
         {
+            LastGeneratedRooms = Array.Empty<GeneratedRoomInfo>();
             var totalStartTime = Time.realtimeSinceStartup;
             var stamp = new TileStampService(targetGrid, floorMap, wallMap);
             var precomputeStartTime = Time.realtimeSinceStartup;
@@ -175,6 +176,7 @@ public partial class MapGraphLevelSolver
                 if (!placer.PlaceFromLayout(layout, ordered, expandedGraph))
                 {
                     lastError = placer.LastError ?? "Failed to place layout.";
+                    LastGeneratedRooms = Array.Empty<GeneratedRoomInfo>();
                     Debug.LogWarning($"[MapGraphLevelSolver] Layout attempt {attempt + 1}/{attempts} failed during placement: {lastError}");
                     if (verboseLogs)
                     {
@@ -188,6 +190,7 @@ public partial class MapGraphLevelSolver
                     continue;
                 }
                 placeSeconds = Time.realtimeSinceStartup - placeStart;
+                LastGeneratedRooms = placer.GetGeneratedRoomsSnapshot();
 
                 var stampStart = Time.realtimeSinceStartup;
                 placer.StampAll(disableRenderers: !destroyPlacedInstances);

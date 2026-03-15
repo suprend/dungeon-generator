@@ -8,6 +8,9 @@
 - `GraphMapBuilder`: `Assets/Scripts/Generation/Runtime/GraphMapBuilder.cs`
   - Вызывает `MapGraphLevelSolver.TrySolveAndPlace(...)` (с layout‑настройками).
   - Подходит для “как в игре”: финальный результат в Tilemaps.
+- `GeneratedLevelRuntime`: `Assets/Scripts/Generation/Runtime/GeneratedLevelRuntime.cs`
+  - Слушает `GraphMapBuilder.GeneratedRoomsChanged`.
+  - Строит runtime lookup `cell -> room`, спавнит игрока и назначает `Follow` для Cinemachine virtual camera.
 
 ### 2) Только assignment solver (без layout/placement/stamp)
 - `GraphGenRunner`: `Assets/Scripts/Generation/Runtime/GraphGenRunner.cs`
@@ -40,4 +43,3 @@
 - Инварианты и контракты: `docs/ai/CONTRACTS.md`
 - Каноническое объяснение алгоритма: `Assets/readme.md`
 - Маппинг док→код: `docs/ai/SEMANTIC_AUDIT.md`
-

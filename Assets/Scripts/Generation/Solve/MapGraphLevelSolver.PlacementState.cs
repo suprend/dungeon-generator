@@ -19,6 +19,7 @@ public partial class MapGraphLevelSolver
 
         private readonly Dictionary<string, Placement> placedNodes = new();
         private readonly List<Placement> placementStack = new();
+        private readonly List<GeneratedRoomInfo> generatedRooms = new();
         private readonly HashSet<Vector3Int> occupiedFloor = new();
         private readonly HashSet<Vector3Int> occupiedWall = new();
         private readonly Dictionary<GameObject, GeometryCache> geometryCache = new();
@@ -57,6 +58,7 @@ public partial class MapGraphLevelSolver
 
         public bool PlaceFromLayout(MapGraphLayoutGenerator.LayoutResult layout, List<MapGraphChainBuilder.Chain> orderedChains, MapGraphAsset graph)
         {
+            generatedRooms.Clear();
             if (layout == null || layout.Rooms == null || layout.Rooms.Count == 0)
             {
                 LastError = "Layout is empty.";
@@ -78,6 +80,11 @@ public partial class MapGraphLevelSolver
                 return false;
 
             return true;
+        }
+
+        public IReadOnlyList<GeneratedRoomInfo> GetGeneratedRoomsSnapshot()
+        {
+            return generatedRooms.ToArray();
         }
     }
 }

@@ -27,7 +27,7 @@ MonoBehaviour:
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 673.98816, y: 46.54724}
+    position: {x: 712.87006, y: 46.499928}
   - id: 17294c98009941e78dab259299814f59
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}

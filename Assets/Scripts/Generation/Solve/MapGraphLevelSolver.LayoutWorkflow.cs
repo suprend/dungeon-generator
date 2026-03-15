@@ -166,6 +166,7 @@ public partial class MapGraphLevelSolver
                     totalStartTime,
                     0f,
                     attemptLayoutSettings.DisallowWallWallOverlap,
+                    attemptSeed,
                     expandedGraph.Nodes.Count,
                     shapeLibrary,
                     configSpaceLibrary);

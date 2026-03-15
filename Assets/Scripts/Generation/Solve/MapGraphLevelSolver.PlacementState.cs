@@ -15,6 +15,7 @@ public partial class MapGraphLevelSolver
         private readonly float startTime;
         private readonly float maxDurationSeconds;
         private readonly bool disallowWallWallOverlap;
+        private readonly int generationSeed;
         public string LastError { get; private set; }
 
         private readonly Dictionary<string, Placement> placedNodes = new();
@@ -40,6 +41,7 @@ public partial class MapGraphLevelSolver
             float startTime,
             float maxDurationSeconds,
             bool disallowWallWallOverlap,
+            int generationSeed,
             int totalNodes,
             ShapeLibrary shapeLibrary,
             ConfigurationSpaceLibrary configSpaceLibrary)
@@ -51,6 +53,7 @@ public partial class MapGraphLevelSolver
             this.startTime = startTime;
             this.maxDurationSeconds = maxDurationSeconds;
             this.disallowWallWallOverlap = disallowWallWallOverlap;
+            this.generationSeed = generationSeed;
             this.shapeLibrary = shapeLibrary;
             this.configSpaceLibrary = configSpaceLibrary;
             this.totalNodes = Mathf.Max(0, totalNodes);

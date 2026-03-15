@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody2D))]
 public sealed class TopDownPlayerController : MonoBehaviour
 {
     [SerializeField] private float moveSpeed = 5f;

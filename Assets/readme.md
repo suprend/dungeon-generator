@@ -106,6 +106,13 @@ README описывает **полный алгоритм** из двух ста
    - при `Cover Connectors=true` fog ставится и на connector’ы,
    - при входе игрока в комнату запускает reveal-анимацию от позиции игрока,
    - визуально это делается через временный fog overlay tilemap и shader `Custom/RoomFogReveal2D`, после чего fog tiles комнаты удаляются из основного `FogMap`.
+16) **Enemy runtime + navmesh**:
+   - room prefab может иметь `RoomEnemySpawnConfig` с `spawnPoints` и несколькими weighted enemy layout’ами,
+   - во время placement выбранный layout фиксируется в `GeneratedRoomInfo.EnemySpawns`; стартовая комната по умолчанию из этого исключается,
+   - каждый enemy prefab должен иметь `EnemyAuthoring`; именно на нём задаются HP, contact damage и базовые AI-параметры, а required runtime-компоненты подтягиваются автоматически,
+   - `GeneratedLevelNavMeshRuntime` пересобирает 2D navmesh после generation/stamp через `NavMeshPlus` (`NavMeshSurface` + `CollectSources2d` на том же object),
+   - `LevelEnemyController` спавнит врагов по snapshot’ам и активирует их только в текущей комнате игрока,
+   - базовый combat-контур: `Health` + `ContactDamageDealer`.
 
 Логи:
 - `[MapGraphLevelSolver] Timings (s): precompute=... solve=... layout=... place=... stamp=... total=...` — разрез по стадиям.

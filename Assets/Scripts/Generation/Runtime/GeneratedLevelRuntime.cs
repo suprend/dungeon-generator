@@ -124,6 +124,15 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
         spawnedPlayerInstance = Instantiate(playerPrefab, startRoom.SpawnWorldPosition, Quaternion.identity);
         if (spawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var playerRoomTracker))
             playerRoomTracker.SetGeneratedLevelRuntime(this);
+        else
+        {
+            playerRoomTracker = spawnedPlayerInstance.AddComponent<PlayerRoomTracker>();
+            playerRoomTracker.SetGeneratedLevelRuntime(this);
+        }
+
+        if (!spawnedPlayerInstance.TryGetComponent<Health>(out var health))
+            health = spawnedPlayerInstance.AddComponent<Health>();
+        health.Configure(health.MaxHealth, false);
 
         TryBindCinemachineTarget(spawnedPlayerInstance.transform);
         PlayerSpawned?.Invoke(spawnedPlayerInstance);

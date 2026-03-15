@@ -8,6 +8,7 @@ using UnityEngine.Tilemaps;
 /// <summary>
 /// Thin wrapper to run MapGraphLevelSolver with prefab placement and stamping.
 /// </summary>
+[DisallowMultipleComponent]
 [RequireComponent(typeof(GeneratedLevelRuntime))]
 public class GraphMapBuilder : MonoBehaviour
 {

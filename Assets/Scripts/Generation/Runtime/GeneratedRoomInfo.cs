@@ -12,9 +12,12 @@ public sealed class GeneratedRoomInfo
     [SerializeField] private Vector3Int rootCell;
     [SerializeField] private BoundsInt cellBounds;
     [SerializeField] private Vector3 spawnWorldPosition;
+    [SerializeField] private bool hasEnemySpawns;
+    [SerializeField] private string selectedEnemyLayoutId;
 
     private readonly HashSet<Vector3Int> floorCells;
     private readonly HashSet<Vector3Int> wallCells;
+    private readonly List<GeneratedEnemySpawnInfo> enemySpawns;
 
     public string NodeId => nodeId;
     public string PrefabName => prefabName;
@@ -23,8 +26,11 @@ public sealed class GeneratedRoomInfo
     public Vector3Int RootCell => rootCell;
     public BoundsInt CellBounds => cellBounds;
     public Vector3 SpawnWorldPosition => spawnWorldPosition;
+    public bool HasEnemySpawns => hasEnemySpawns;
+    public string SelectedEnemyLayoutId => selectedEnemyLayoutId;
     public IReadOnlyCollection<Vector3Int> FloorCells => floorCells;
     public IReadOnlyCollection<Vector3Int> WallCells => wallCells;
+    public IReadOnlyList<GeneratedEnemySpawnInfo> EnemySpawns => enemySpawns;
 
     public GeneratedRoomInfo(
         string nodeId,
@@ -34,6 +40,9 @@ public sealed class GeneratedRoomInfo
         Vector3Int rootCell,
         BoundsInt cellBounds,
         Vector3 spawnWorldPosition,
+        bool hasEnemySpawns,
+        string selectedEnemyLayoutId,
+        IEnumerable<GeneratedEnemySpawnInfo> enemySpawns,
         IEnumerable<Vector3Int> floorCells,
         IEnumerable<Vector3Int> wallCells)
     {
@@ -44,6 +53,9 @@ public sealed class GeneratedRoomInfo
         this.rootCell = rootCell;
         this.cellBounds = cellBounds;
         this.spawnWorldPosition = spawnWorldPosition;
+        this.hasEnemySpawns = hasEnemySpawns;
+        this.selectedEnemyLayoutId = selectedEnemyLayoutId ?? string.Empty;
+        this.enemySpawns = enemySpawns != null ? new List<GeneratedEnemySpawnInfo>(enemySpawns) : new List<GeneratedEnemySpawnInfo>();
         this.floorCells = floorCells != null ? new HashSet<Vector3Int>(floorCells) : new HashSet<Vector3Int>();
         this.wallCells = wallCells != null ? new HashSet<Vector3Int>(wallCells) : new HashSet<Vector3Int>();
     }

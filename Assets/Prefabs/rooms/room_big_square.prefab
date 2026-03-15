@@ -2301,6 +2301,37 @@ MonoBehaviour:
   Width: 1
   SpanId: 347d189b8bc045509add3f981cf6baf6
   BiteDepth: 1
+--- !u!1 &3691967845712615384
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 985748381975416370}
+  m_Layer: 0
+  m_Name: enemy_spawn
+  m_TagString: Untagged
+  m_Icon: {fileID: 7174288486110832750, guid: 0000000000000000d000000000000000, type: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &985748381975416370
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3691967845712615384}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -0.5, y: -3.5, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 5027845784936059860}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4166020637758326076
 GameObject:
   m_ObjectHideFlags: 0
@@ -3942,6 +3973,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5027845784936059860}
   - component: {fileID: 4992324538920519091}
+  - component: {fileID: 1427153929171219032}
   m_Layer: 0
   m_Name: room_big_square
   m_TagString: Untagged
@@ -3967,6 +3999,7 @@ Transform:
   - {fileID: 5801869627838996240}
   - {fileID: 5903665145201242416}
   - {fileID: 4986862104457694658}
+  - {fileID: 985748381975416370}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &4992324538920519091
@@ -4027,6 +4060,32 @@ MonoBehaviour:
   - {fileID: 3865130034567340916}
   - {fileID: 9173055256853548659}
   - {fileID: 6704278336986398570}
+--- !u!114 &1427153929171219032
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6881860542125881072}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc4c86eda68104a12a6a7ea41fcad846, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableEnemySpawns: 1
+  excludeFromDefaultSpawning: 0
+  spawnPoints:
+  - id: enemy_spawn
+    point: {fileID: 985748381975416370}
+    facingDegrees: 0
+    enabled: 1
+  layouts:
+  - id: layout_1
+    weight: 1
+    isEnabled: 1
+    entries:
+    - spawnPointId: enemy_spawn
+      enemyPrefab: {fileID: 953530847934859495, guid: 19fe63fae4bb64d0fa30596d6be3d84e, type: 3}
 --- !u!1 &6985691206258636433
 GameObject:
   m_ObjectHideFlags: 0

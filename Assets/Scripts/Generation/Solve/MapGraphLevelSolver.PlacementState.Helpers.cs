@@ -309,6 +309,9 @@ public partial class MapGraphLevelSolver
             var spawnWorldPosition = startMarker != null ? startMarker.SpawnPoint.position : placement.Meta.transform.position;
             var allCells = placement.FloorCells.Concat(placement.WallCells);
             var bounds = GeneratedRoomInfo.ComputeBounds(allCells);
+            var selectedEnemyLayoutId = string.Empty;
+            var enemySpawns = isConnector ? new List<GeneratedEnemySpawnInfo>() : BuildGeneratedEnemySpawns(nodeId, placement, out selectedEnemyLayoutId);
+            var hasEnemySpawns = enemySpawns.Count > 0;
 
             generatedRooms.Add(new GeneratedRoomInfo(
                 nodeId,
@@ -318,8 +321,70 @@ public partial class MapGraphLevelSolver
                 placement.RootCell,
                 bounds,
                 spawnWorldPosition,
+                hasEnemySpawns,
+                selectedEnemyLayoutId,
+                enemySpawns,
                 placement.FloorCells,
                 placement.WallCells));
+        }
+
+        private List<GeneratedEnemySpawnInfo> BuildGeneratedEnemySpawns(string nodeId, Placement placement, out string selectedLayoutId)
+        {
+            selectedLayoutId = string.Empty;
+            var result = new List<GeneratedEnemySpawnInfo>();
+            if (placement?.Meta == null)
+                return result;
+
+            var enemyConfig = placement.Meta.GetComponentInChildren<RoomEnemySpawnConfig>(true);
+            if (enemyConfig == null || !enemyConfig.EnableEnemySpawns || enemyConfig.ExcludeFromDefaultSpawning)
+                return result;
+            if (placement.Meta.GetComponentInChildren<StartRoomSpawn>(true) != null)
+                return result;
+
+            var roomRng = new System.Random(ComputeStableSeed(generationSeed, nodeId));
+            var selectedLayout = enemyConfig.PickRandomLayout(roomRng);
+            if (selectedLayout == null || selectedLayout.Entries == null)
+                return result;
+
+            selectedLayoutId = selectedLayout.Id ?? string.Empty;
+            foreach (var entry in selectedLayout.Entries)
+            {
+                if (entry == null || entry.EnemyPrefab == null)
+                {
+                    Debug.LogWarning($"[MapGraphLevelSolver] Room '{placement.Meta.name}' has enemy entry with missing prefab.");
+                    continue;
+                }
+
+                if (!enemyConfig.TryResolveSpawnPoint(entry.SpawnPointId, out var spawnPoint) || spawnPoint?.Point == null)
+                {
+                    Debug.LogWarning($"[MapGraphLevelSolver] Room '{placement.Meta.name}' cannot resolve enemy spawn point '{entry?.SpawnPointId}'.");
+                    continue;
+                }
+
+                result.Add(new GeneratedEnemySpawnInfo(
+                    spawnPoint.GetResolvedId(),
+                    entry.EnemyPrefab,
+                    spawnPoint.Point.position,
+                    spawnPoint.FacingDegrees,
+                    spawnPoint.Enabled));
+            }
+
+            return result;
+        }
+
+        private static int ComputeStableSeed(int baseSeed, string nodeId)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = (hash * 31) + baseSeed;
+                if (!string.IsNullOrEmpty(nodeId))
+                {
+                    for (var i = 0; i < nodeId.Length; i++)
+                        hash = (hash * 31) + nodeId[i];
+                }
+                return hash;
+            }
         }
 
         public void StampAll(bool disableRenderers = true)

@@ -58,21 +58,6 @@ MonoBehaviour:
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
     position: {x: 288.79724, y: -81.905525}
-  - id: de6aa7b4ef78488d8f93a9845434c778
-    label: BaseRoom
-    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
-    notes: 
-    position: {x: 239.03265, y: 187.12543}
-  - id: bbfa6d9eadd149d4b48e96c1c93a13d7
-    label: BaseRoom
-    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
-    notes: 
-    position: {x: 235.29036, y: 300.46213}
-  - id: 6d96717bab99477d9386333afff8a18a
-    label: BaseRoom
-    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
-    notes: 
-    position: {x: 399.256, y: 292.87283}
   edges:
   - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
     toNodeId: a4eae09f5d474e819ff8ba25c6c49887
@@ -100,18 +85,6 @@ MonoBehaviour:
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   - fromNodeId: df4d330a03cb48d897026d0dc5603f1c
     toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 6d96717bab99477d9386333afff8a18a
-    toNodeId: a4eae09f5d474e819ff8ba25c6c49887
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: de6aa7b4ef78488d8f93a9845434c778
-    toNodeId: a4eae09f5d474e819ff8ba25c6c49887
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: bbfa6d9eadd149d4b48e96c1c93a13d7
-    toNodeId: 6d96717bab99477d9386333afff8a18a
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: bbfa6d9eadd149d4b48e96c1c93a13d7
-    toNodeId: de6aa7b4ef78488d8f93a9845434c778
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
   defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

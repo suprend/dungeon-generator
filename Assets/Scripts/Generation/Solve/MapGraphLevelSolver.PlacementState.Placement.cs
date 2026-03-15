@@ -80,6 +80,7 @@ public partial class MapGraphLevelSolver
                 }
 
                 CommitPlacement(room.NodeId, placement);
+                RecordGeneratedRoom(room.NodeId, placement);
             }
 
             ValidateAllEdgesTouch(graph);

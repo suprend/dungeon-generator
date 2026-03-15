@@ -1,4 +1,6 @@
 // Assets/Scripts/Generation/Runtime/GraphMapBuilder.cs
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
@@ -6,6 +8,7 @@ using UnityEngine.Tilemaps;
 /// <summary>
 /// Thin wrapper to run MapGraphLevelSolver with prefab placement and stamping.
 /// </summary>
+[RequireComponent(typeof(GeneratedLevelRuntime))]
 public class GraphMapBuilder : MonoBehaviour
 {
     [Header("Graph")]
@@ -19,7 +22,7 @@ public class GraphMapBuilder : MonoBehaviour
     [Header("Execution")]
     public bool runOnStart = true;
     public bool clearOnRun = true;
-    public int randomSeed = 0; // 0 = random
+    public int randomSeed = 0;
     public bool verboseLogs = false;
     [FormerlySerializedAs("placementTimeLimitSeconds")]
     [Tooltip("Time limit for one layout-generation try (SA/stack search), in seconds. 0 = unlimited.")]
@@ -68,6 +71,7 @@ public class GraphMapBuilder : MonoBehaviour
     public bool useCycleClosureBias = true;
     [Tooltip("If enabled, wall↔wall overlaps are treated as illegal during layout and placement. This is stricter and may reduce success rate.")]
     public bool disallowWallWallOverlap = false;
+
     [Header("Debug")]
     public bool verboseConfigSpaceLogs = false;
     public int maxConfigSpaceLogs = 64;
@@ -77,6 +81,9 @@ public class GraphMapBuilder : MonoBehaviour
     public int debugNoLayoutsTopPairs = 6;
     [Tooltip("How many problematic edges to log in DebugNoLayouts mode.")]
     public int debugNoLayoutsTopEdges = 16;
+
+    public IReadOnlyList<GeneratedRoomInfo> LastGeneratedRooms { get; private set; } = Array.Empty<GeneratedRoomInfo>();
+    public event Action GeneratedRoomsChanged;
 
     private void Awake()
     {
@@ -89,17 +96,22 @@ public class GraphMapBuilder : MonoBehaviour
     {
         if (graph == null)
         {
+            LastGeneratedRooms = Array.Empty<GeneratedRoomInfo>();
+            GeneratedRoomsChanged?.Invoke();
             Debug.LogWarning("[GraphMapBuilder] Graph asset is not assigned.");
             return;
         }
+
         if (targetGrid == null || floorMap == null)
         {
+            LastGeneratedRooms = Array.Empty<GeneratedRoomInfo>();
+            GeneratedRoomsChanged?.Invoke();
             Debug.LogWarning("[GraphMapBuilder] Target Grid and Floor Map are required.");
             return;
         }
 
         var solver = new MapGraphLevelSolver(graph);
-        Vector3Int? startCell = targetGrid != null ? targetGrid.WorldToCell(transform.position) : null;
+        Vector3Int? startCell = targetGrid.WorldToCell(transform.position);
         var settings = new MapGraphLayoutGenerator.Settings
         {
             MaxLayoutsPerChain = maxLayoutsPerChain,
@@ -144,7 +156,13 @@ public class GraphMapBuilder : MonoBehaviour
                 maxLayoutsPerChain,
                 layoutRetries))
         {
+            LastGeneratedRooms = Array.Empty<GeneratedRoomInfo>();
+            GeneratedRoomsChanged?.Invoke();
             Debug.LogError($"[GraphMapBuilder] Generation failed: {error}");
+            return;
         }
+
+        LastGeneratedRooms = solver.LastGeneratedRooms ?? Array.Empty<GeneratedRoomInfo>();
+        GeneratedRoomsChanged?.Invoke();
     }
 }

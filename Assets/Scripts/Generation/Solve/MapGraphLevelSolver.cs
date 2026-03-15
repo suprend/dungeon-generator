@@ -16,6 +16,8 @@ public partial class MapGraphLevelSolver
     private ShapeLibrary shapeLibrary;
     private ConfigurationSpaceLibrary configSpaceLibrary;
 
+    public IReadOnlyList<GeneratedRoomInfo> LastGeneratedRooms { get; private set; } = Array.Empty<GeneratedRoomInfo>();
+
     public MapGraphLevelSolver(MapGraphAsset graphAsset)
     {
         this.graphAsset = graphAsset;

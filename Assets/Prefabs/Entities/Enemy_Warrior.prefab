@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 6003096635547059975}
   - component: {fileID: 6764876076741661473}
   - component: {fileID: 440083527976962648}
+  - component: {fileID: 3235688219227934481}
   - component: {fileID: 4969665062101085999}
   - component: {fileID: 8836053741070368398}
   m_Layer: 0
@@ -204,6 +205,25 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHealth: 10
   destroyOnDeath: 1
+--- !u!114 &3235688219227934481
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4741f598fde44599a891d65e8c471dcb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  worldYOffset: 0.4
+  barWidth: 0.95
+  barHeight: 0.14
+  barPadding: 0.02
+  fillMinColor: {r: 0.85, g: 0.2, b: 0.2, a: 1}
+  fillMaxColor: {r: 0.2, g: 0.9, b: 0.35, a: 1}
+  backgroundColor: {r: 0.08, g: 0.08, b: 0.08, a: 0.85}
 --- !u!114 &4969665062101085999
 MonoBehaviour:
   m_ObjectHideFlags: 0

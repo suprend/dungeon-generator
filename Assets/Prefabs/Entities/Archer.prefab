@@ -14,6 +14,9 @@ GameObject:
   - component: {fileID: 2651936027929603977}
   - component: {fileID: -3331769331543845517}
   - component: {fileID: 7673377436053774062}
+  - component: {fileID: 3614430671718406370}
+  - component: {fileID: 5921195160406534122}
+  - component: {fileID: 2530105994130935681}
   m_Layer: 0
   m_Name: Archer
   m_TagString: Untagged
@@ -33,7 +36,8 @@ Transform:
   m_LocalPosition: {x: -8.227187, y: 5.4555216, z: 0}
   m_LocalScale: {x: 2.5, y: 2.5, z: 2.5}
   m_ConstrainProportionsScale: 1
-  m_Children: []
+  m_Children:
+  - {fileID: 5437482612350067080}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!212 &3835097545032411477
@@ -133,8 +137,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b919eeb844d5b4ed8bf80a80900365ed, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   moveSpeed: 5
   normalizeDiagonal: 1
   flipHorizontally: 1
@@ -176,8 +180,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a3f368a959b324c86bcebc1deb17f53a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   generatedLevelRuntime: {fileID: 0}
   pollIntervalSeconds: 0.1
   currentRoomNodeId: 
@@ -189,3 +193,84 @@ MonoBehaviour:
   onExitedRoom:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &3614430671718406370
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae4f3d53b0c434ccdbd1b84d72804c55, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  maxHealth: 10
+  destroyOnDeath: 1
+--- !u!114 &5921195160406534122
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4741f598fde44599a891d65e8c471dcb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  worldYOffset: 0.4
+  barWidth: 0.95
+  barHeight: 0.14
+  barPadding: 0.02
+  fillMinColor: {r: 0.85, g: 0.2, b: 0.2, a: 1}
+  fillMaxColor: {r: 0.2, g: 0.9, b: 0.35, a: 1}
+  backgroundColor: {r: 0.08, g: 0.08, b: 0.08, a: 0.85}
+--- !u!114 &2530105994130935681
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 64b2f4e3bdb94590a4575b48ca0b5e6a, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  shootOrigin: {fileID: 5437482612350067080}
+  shootOriginLocalOffset: {x: 0.35, y: 0.05}
+  horizontalFlipDeadZone: 0.08
+  shotIntervalSeconds: 0.35
+  projectilePrefab: {fileID: 5005, guid: bfcc15bf7f5c4a28962f71eef72fc8be, type: 3}
+--- !u!1 &6547670165444650658
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5437482612350067080}
+  m_Layer: 0
+  m_Name: shoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 7174288486110832750, guid: 0000000000000000d000000000000000, type: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5437482612350067080
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6547670165444650658}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0.135, y: -0.073, z: 0}
+  m_LocalScale: {x: 0.1, y: 0.1, z: 0.1}
+  m_ConstrainProportionsScale: 1
+  m_Children: []
+  m_Father: {fileID: 2767024122258610870}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

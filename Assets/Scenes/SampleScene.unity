@@ -894,6 +894,7 @@ GameObject:
   - component: {fileID: 809282460}
   - component: {fileID: 809282459}
   - component: {fileID: 809282463}
+  - component: {fileID: 809282464}
   m_Layer: 0
   m_Name: graphBuilder
   m_TagString: Untagged
@@ -1074,6 +1075,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _rootSources:
   - {fileID: 436320408}
+--- !u!114 &809282464
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 809282454}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 89758fabaad04a34beffdaf88575cb81, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  generatedLevelRuntime: {fileID: 809282458}
+  titleText: You Died
+  hintText: Press R or use the button to restart
+  buttonText: Restart
+  restartKey: 114
 --- !u!1 &1103427778
 GameObject:
   m_ObjectHideFlags: 0

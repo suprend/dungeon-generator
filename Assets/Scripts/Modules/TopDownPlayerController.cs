@@ -10,12 +10,16 @@ public sealed class TopDownPlayerController : MonoBehaviour
 
     private Rigidbody2D body2D;
     private Vector2 moveInput;
+    private int facingSign = 1;
 
     public float MoveSpeed
     {
         get => moveSpeed;
         set => moveSpeed = Mathf.Max(0f, value);
     }
+
+    public Transform VisualRoot => GetVisualRoot();
+    public int FacingSign => facingSign;
 
     private void Awake()
     {
@@ -52,12 +56,19 @@ public sealed class TopDownPlayerController : MonoBehaviour
 
     private void UpdateHorizontalFlip()
     {
-        if (Mathf.Abs(moveInput.x) <= 0.001f)
+        SetFacingX(moveInput.x);
+    }
+
+    public void SetFacingX(float horizontalLook)
+    {
+        if (!flipHorizontally || Mathf.Abs(horizontalLook) <= 0.001f)
             return;
+
+        facingSign = horizontalLook < 0f ? -1 : 1;
 
         var target = GetVisualRoot();
         var scale = target.localScale;
-        scale.x = Mathf.Abs(scale.x) * (moveInput.x < 0f ? -1f : 1f);
+        scale.x = Mathf.Abs(scale.x) * facingSign;
         target.localScale = scale;
     }
 }

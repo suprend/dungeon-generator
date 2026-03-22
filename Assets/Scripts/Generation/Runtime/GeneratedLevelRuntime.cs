@@ -134,6 +134,11 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             health = spawnedPlayerInstance.AddComponent<Health>();
         health.Configure(health.MaxHealth, false);
 
+        if (!spawnedPlayerInstance.TryGetComponent<HealthBarView>(out _))
+            Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no HealthBarView; player HP bar is disabled.", spawnedPlayerInstance);
+        if (!spawnedPlayerInstance.TryGetComponent<PlayerBowAttack>(out _))
+            Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no PlayerBowAttack; ranged attack is disabled.", spawnedPlayerInstance);
+
         TryBindCinemachineTarget(spawnedPlayerInstance.transform);
         PlayerSpawned?.Invoke(spawnedPlayerInstance);
     }

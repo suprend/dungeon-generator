@@ -7,9 +7,12 @@ public sealed class TopDownPlayerController : MonoBehaviour
     [SerializeField] private bool normalizeDiagonal = true;
     [SerializeField] private bool flipHorizontally = true;
     [SerializeField] private Transform visualRoot;
+    [SerializeField] private bool playerInputEnabled = true;
+    [SerializeField] private bool suppressAutoDeathMenu;
 
     private Rigidbody2D body2D;
     private Vector2 moveInput;
+    private Vector2 externalMoveInput;
     private int facingSign = 1;
 
     public float MoveSpeed
@@ -20,6 +23,12 @@ public sealed class TopDownPlayerController : MonoBehaviour
 
     public Transform VisualRoot => GetVisualRoot();
     public int FacingSign => facingSign;
+    public bool PlayerInputEnabled => playerInputEnabled;
+    public bool SuppressAutoDeathMenu
+    {
+        get => suppressAutoDeathMenu;
+        set => suppressAutoDeathMenu = value;
+    }
 
     private void Awake()
     {
@@ -30,10 +39,13 @@ public sealed class TopDownPlayerController : MonoBehaviour
 
     private void Update()
     {
-        moveInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        moveInput = playerInputEnabled
+            ? new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"))
+            : externalMoveInput;
+
         if (normalizeDiagonal && moveInput.sqrMagnitude > 1f)
             moveInput.Normalize();
-        if (flipHorizontally)
+        if (flipHorizontally && playerInputEnabled)
             UpdateHorizontalFlip();
     }
 
@@ -70,5 +82,19 @@ public sealed class TopDownPlayerController : MonoBehaviour
         var scale = target.localScale;
         scale.x = Mathf.Abs(scale.x) * facingSign;
         target.localScale = scale;
+    }
+
+    public void SetPlayerInputEnabled(bool enabled)
+    {
+        playerInputEnabled = enabled;
+        if (enabled)
+            externalMoveInput = Vector2.zero;
+    }
+
+    public void SetExternalMoveInput(Vector2 input)
+    {
+        externalMoveInput = normalizeDiagonal && input.sqrMagnitude > 1f
+            ? input.normalized
+            : input;
     }
 }

@@ -980,6 +980,10 @@ MonoBehaviour:
   graphMapBuilder: {fileID: 809282457}
   spawnPlayerAfterBuild: 1
   playerPrefab: {fileID: 953530847934859495, guid: a1fd6bce3acb14703bd3680ee431ce42, type: 3}
+  partyMemberPrefabs:
+  - {fileID: 953530847934859495, guid: 405ce75b4d644bf29bece99f2dc8a3b7, type: 3}
+  - {fileID: 953530847934859495, guid: bf2610b8d34344ddba404e4327be3653, type: 3}
+  allowCompanionTeleportToExploredRooms: 0
   cinemachineCamera: {fileID: 43209020}
 --- !u!114 &809282459
 MonoBehaviour:
@@ -1056,7 +1060,7 @@ MonoBehaviour:
   m_OverrideTileSize: 0
   m_TileSize: 256
   m_OverrideVoxelSize: 0
-  m_VoxelSize: 0.033333335
+  m_VoxelSize: 0.11666667
   m_BuildHeightMesh: 0
   m_MinRegionArea: 0
   m_HideEditorLogs: 0
@@ -1085,13 +1089,12 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 89758fabaad04a34beffdaf88575cb81, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
-  generatedLevelRuntime: {fileID: 809282458}
-  titleText: You Died
-  hintText: Press R or use the button to restart
-  buttonText: Restart
+  m_Name: 
+  m_EditorClassIdentifier: 
+  restartButtonText: Restart
+  exitButtonText: Exit
   restartKey: 114
+  exitKey: 27
 --- !u!1 &1103427778
 GameObject:
   m_ObjectHideFlags: 0

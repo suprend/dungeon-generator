@@ -39,7 +39,8 @@ public sealed class Health : MonoBehaviour
 
         isDead = true;
         Died?.Invoke(this);
-        if (GetComponentInParent<TopDownPlayerController>() != null)
+        var playerController = GetComponentInParent<TopDownPlayerController>();
+        if (playerController != null && playerController.enabled && !playerController.SuppressAutoDeathMenu)
         {
             Debug.Log($"[Health] Triggering death menu for player '{name}'.");
             PlayerDeathRestartMenu.Show();
@@ -49,6 +50,19 @@ public sealed class Health : MonoBehaviour
             Destroy(gameObject);
         else
             Debug.Log($"[Health] {name} died.");
+    }
+
+    public void Heal(int amount)
+    {
+        if (isDead)
+            return;
+
+        var newHealth = Mathf.Min(MaxHealth, currentHealth + Mathf.Max(0, amount));
+        if (newHealth == currentHealth)
+            return;
+
+        currentHealth = newHealth;
+        Changed?.Invoke(this);
     }
 
     public void RestoreFull()

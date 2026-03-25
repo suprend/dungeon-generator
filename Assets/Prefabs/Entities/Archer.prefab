@@ -13,10 +13,14 @@ GameObject:
   - component: {fileID: 8600912733922040888}
   - component: {fileID: 2651936027929603977}
   - component: {fileID: -3331769331543845517}
+  - component: {fileID: 1700000000000000000}
   - component: {fileID: 7673377436053774062}
   - component: {fileID: 3614430671718406370}
   - component: {fileID: 5921195160406534122}
   - component: {fileID: 2530105994130935681}
+  - component: {fileID: 1800000000000000000}
+  - component: {fileID: 1500000000000000000}
+  - component: {fileID: 1600000000000000000}
   m_Layer: 0
   m_Name: Archer
   m_TagString: Untagged
@@ -170,6 +174,28 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 4
+--- !u!195 &1700000000000000000
+NavMeshAgent:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_AgentTypeID: 0
+  m_Radius: 0.2
+  m_Speed: 5
+  m_Acceleration: 15
+  avoidancePriority: 50
+  m_AngularSpeed: 120
+  m_StoppingDistance: 1.8
+  m_AutoTraverseOffMeshLink: 1
+  m_AutoBraking: 1
+  m_AutoRepath: 1
+  m_Height: 1
+  m_BaseOffset: 0.5
+  m_WalkableMask: 4294967295
+  m_ObstacleAvoidanceType: 4
 --- !u!114 &7673377436053774062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -243,6 +269,65 @@ MonoBehaviour:
   horizontalFlipDeadZone: 0.08
   shotIntervalSeconds: 0.35
   projectilePrefab: {fileID: 5005, guid: bfcc15bf7f5c4a28962f71eef72fc8be, type: 3}
+--- !u!114 &1800000000000000000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a38946a8eff442d09061e1d13a1a1550, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  followDistance: 1.8
+  teleportDistance: 10
+  navMeshRepathInterval: 0.15
+  navMeshSampleRadius: 2
+  attackDistance: 8
+  playerController: {fileID: 2651936027929603977}
+  bowAttack: {fileID: 2530105994130935681}
+  playerClassRuntime: {fileID: 1500000000000000000}
+  health: {fileID: 3614430671718406370}
+  body2D: {fileID: -3331769331543845517}
+  playerRoomTracker: {fileID: 7673377436053774062}
+  navMeshAgent: {fileID: 1700000000000000000}
+--- !u!114 &1500000000000000000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b6d5cc7f0b24d7982d173596705f4c3, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  defaultClassDefinition: {fileID: 11400000, guid: 7832c195a82d0a04cad3d3a542b9c5f8, type: 2}
+  playerController: {fileID: 2651936027929603977}
+  body2D: {fileID: -3331769331543845517}
+  health: {fileID: 3614430671718406370}
+  bowAttack: {fileID: 2530105994130935681}
+  ability1Key: 49
+  ability2Key: 50
+  ability3Key: 51
+--- !u!114 &1600000000000000000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6316345409b34bda8013e35cfc546e74, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  playerClassRuntime: {fileID: 1500000000000000000}
+  referenceResolution: {x: 1920, y: 1080}
+  panelAnchorPosition: {x: 28, y: -28}
 --- !u!1 &6547670165444650658
 GameObject:
   m_ObjectHideFlags: 0

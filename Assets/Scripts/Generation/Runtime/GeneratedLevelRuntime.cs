@@ -10,6 +10,8 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
     [SerializeField] private GraphMapBuilder graphMapBuilder;
     [SerializeField] private bool spawnPlayerAfterBuild;
     [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private List<GameObject> partyMemberPrefabs = new();
+    [SerializeField] private bool allowCompanionTeleportToExploredRooms;
     [SerializeField] private Component cinemachineCamera;
 
     private static readonly IReadOnlyList<GeneratedRoomInfo> EmptyRooms = Array.Empty<GeneratedRoomInfo>();
@@ -64,6 +66,36 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
         return roomByFloorCell.TryGetValue(cell, out roomInfo);
     }
 
+    public bool TryGetNearestFloorWorldPosition(GeneratedRoomInfo roomInfo, Vector3 desiredWorldPosition, out Vector3 worldPosition)
+    {
+        worldPosition = desiredWorldPosition;
+        if (roomInfo == null || roomInfo.FloorCells == null || graphMapBuilder == null || graphMapBuilder.targetGrid == null)
+            return false;
+
+        var bestCell = default(Vector3Int);
+        var bestSqrDistance = float.MaxValue;
+        var foundAny = false;
+
+        foreach (var floorCell in roomInfo.FloorCells)
+        {
+            var cellWorld = graphMapBuilder.targetGrid.GetCellCenterWorld(floorCell);
+            var sqrDistance = (cellWorld - desiredWorldPosition).sqrMagnitude;
+            if (sqrDistance >= bestSqrDistance)
+                continue;
+
+            bestSqrDistance = sqrDistance;
+            bestCell = floorCell;
+            foundAny = true;
+        }
+
+        if (!foundAny)
+            return false;
+
+        worldPosition = graphMapBuilder.targetGrid.GetCellCenterWorld(bestCell);
+        worldPosition.z = desiredWorldPosition.z;
+        return true;
+    }
+
     private void HandleGeneratedRoomsChanged()
     {
         RebuildRoomLookup();
@@ -92,7 +124,8 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
 
     private void TrySpawnPlayer()
     {
-        if (!spawnPlayerAfterBuild || playerPrefab == null)
+        var shouldSpawnParty = ShouldSpawnParty();
+        if (!spawnPlayerAfterBuild || (!shouldSpawnParty && playerPrefab == null))
             return;
         if (!Application.isPlaying)
         {
@@ -121,7 +154,13 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
         if (spawnedPlayerInstance != null)
             Destroy(spawnedPlayerInstance);
 
-        spawnedPlayerInstance = Instantiate(playerPrefab, startRoom.SpawnWorldPosition, Quaternion.identity);
+        spawnedPlayerInstance = shouldSpawnParty
+            ? SpawnParty(startRoom.SpawnWorldPosition)
+            : SpawnSinglePlayer(startRoom.SpawnWorldPosition);
+
+        if (spawnedPlayerInstance == null)
+            return;
+
         if (spawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var playerRoomTracker))
             playerRoomTracker.SetGeneratedLevelRuntime(this);
         else
@@ -130,17 +169,78 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             playerRoomTracker.SetGeneratedLevelRuntime(this);
         }
 
-        if (!spawnedPlayerInstance.TryGetComponent<Health>(out var health))
-            health = spawnedPlayerInstance.AddComponent<Health>();
-        health.Configure(health.MaxHealth, false);
+        if (spawnedPlayerInstance.TryGetComponent<PlayerPartyController>(out var partyController))
+        {
+            partyController.SetGeneratedLevelRuntime(this);
+            partyController.SetAllowCompanionTeleportToExploredRooms(allowCompanionTeleportToExploredRooms);
+        }
 
-        if (!spawnedPlayerInstance.TryGetComponent<HealthBarView>(out _))
-            Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no HealthBarView; player HP bar is disabled.", spawnedPlayerInstance);
-        if (!spawnedPlayerInstance.TryGetComponent<PlayerBowAttack>(out _))
-            Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no PlayerBowAttack; ranged attack is disabled.", spawnedPlayerInstance);
+        if (!shouldSpawnParty)
+        {
+            if (!spawnedPlayerInstance.TryGetComponent<Health>(out var health))
+                health = spawnedPlayerInstance.AddComponent<Health>();
+            health.Configure(health.MaxHealth, false);
+
+            if (!spawnedPlayerInstance.TryGetComponent<HealthBarView>(out _))
+                Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no HealthBarView; player HP bar is disabled.", spawnedPlayerInstance);
+            if (!spawnedPlayerInstance.TryGetComponent<PlayerBowAttack>(out _))
+                Debug.LogWarning("[GeneratedLevelRuntime] Player prefab has no PlayerBowAttack; ranged attack is disabled.", spawnedPlayerInstance);
+        }
 
         TryBindCinemachineTarget(spawnedPlayerInstance.transform);
         PlayerSpawned?.Invoke(spawnedPlayerInstance);
+    }
+
+    private bool ShouldSpawnParty()
+    {
+        for (var i = 0; i < partyMemberPrefabs.Count; i++)
+        {
+            if (partyMemberPrefabs[i] != null)
+                return true;
+        }
+
+        return false;
+    }
+
+    private GameObject SpawnSinglePlayer(Vector3 spawnPosition)
+    {
+        if (playerPrefab == null)
+            return null;
+
+        return Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
+    }
+
+    private GameObject SpawnParty(Vector3 spawnPosition)
+    {
+        var partyRoot = new GameObject("PlayerParty");
+        partyRoot.transform.position = spawnPosition;
+
+        var partyController = partyRoot.AddComponent<PlayerPartyController>();
+        var memberInstances = new List<GameObject>();
+
+        for (var i = 0; i < partyMemberPrefabs.Count; i++)
+        {
+            var memberPrefab = partyMemberPrefabs[i];
+            if (memberPrefab == null)
+                continue;
+
+            var memberSpawnPosition = spawnPosition + (Vector3)PlayerPartyController.GetSpawnOffset(memberInstances.Count);
+            var memberInstance = Instantiate(memberPrefab, memberSpawnPosition, Quaternion.identity);
+
+            if (memberInstance.TryGetComponent<PlayerRoomTracker>(out var playerRoomTracker))
+                playerRoomTracker.enabled = false;
+
+            memberInstances.Add(memberInstance);
+        }
+
+        if (memberInstances.Count == 0)
+        {
+            Destroy(partyRoot);
+            return null;
+        }
+
+        partyController.Initialize(memberInstances);
+        return partyRoot;
     }
 
     private void TryBindCinemachineTarget(Transform target)

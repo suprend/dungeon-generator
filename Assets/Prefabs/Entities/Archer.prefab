@@ -21,6 +21,7 @@ GameObject:
   - component: {fileID: 1800000000000000000}
   - component: {fileID: 1500000000000000000}
   - component: {fileID: 1600000000000000000}
+  - component: {fileID: 6348706716610139214}
   m_Layer: 0
   m_Name: Archer
   m_TagString: Untagged
@@ -38,7 +39,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -8.227187, y: 5.4555216, z: 0}
-  m_LocalScale: {x: 2.5, y: 2.5, z: 2.5}
+  m_LocalScale: {x: 2, y: 2, z: 2}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 5437482612350067080}
@@ -84,7 +85,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 1
   m_Sprite: {fileID: -1310300531, guid: d7cbe940886fd498dbf2747b10c9b1f2, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -141,12 +142,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b919eeb844d5b4ed8bf80a80900365ed, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   moveSpeed: 5
   normalizeDiagonal: 1
   flipHorizontally: 1
   visualRoot: {fileID: 0}
+  playerInputEnabled: 1
+  suppressAutoDeathMenu: 0
 --- !u!50 &-3331769331543845517
 Rigidbody2D:
   serializedVersion: 4
@@ -206,8 +209,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a3f368a959b324c86bcebc1deb17f53a, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   generatedLevelRuntime: {fileID: 0}
   pollIntervalSeconds: 0.1
   currentRoomNodeId: 
@@ -229,8 +232,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ae4f3d53b0c434ccdbd1b84d72804c55, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   maxHealth: 10
   destroyOnDeath: 1
 --- !u!114 &5921195160406534122
@@ -243,8 +246,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4741f598fde44599a891d65e8c471dcb, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   worldYOffset: 0.4
   barWidth: 0.95
   barHeight: 0.14
@@ -262,13 +265,15 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 64b2f4e3bdb94590a4575b48ca0b5e6a, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   shootOrigin: {fileID: 5437482612350067080}
   shootOriginLocalOffset: {x: 0.35, y: 0.05}
+  projectileSpawnForwardOffset: 0.08
   horizontalFlipDeadZone: 0.08
   shotIntervalSeconds: 0.35
   projectilePrefab: {fileID: 5005, guid: bfcc15bf7f5c4a28962f71eef72fc8be, type: 3}
+  playerInputEnabled: 1
 --- !u!114 &1800000000000000000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -279,8 +284,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a38946a8eff442d09061e1d13a1a1550, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   followDistance: 1.8
   teleportDistance: 10
   navMeshRepathInterval: 0.15
@@ -303,8 +308,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6b6d5cc7f0b24d7982d173596705f4c3, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   defaultClassDefinition: {fileID: 11400000, guid: 7832c195a82d0a04cad3d3a542b9c5f8, type: 2}
   playerController: {fileID: 2651936027929603977}
   body2D: {fileID: -3331769331543845517}
@@ -313,6 +318,7 @@ MonoBehaviour:
   ability1Key: 49
   ability2Key: 50
   ability3Key: 51
+  playerInputEnabled: 1
 --- !u!114 &1600000000000000000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -323,11 +329,29 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6316345409b34bda8013e35cfc546e74, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   playerClassRuntime: {fileID: 1500000000000000000}
   referenceResolution: {x: 1920, y: 1080}
   panelAnchorPosition: {x: 28, y: -28}
+--- !u!114 &6348706716610139214
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61e2cbe2fe0fc4bfdba5c6dba9091bd6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  interactKey: 102
+  interactRadius: 1.25
+  interactableLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  playerController: {fileID: 2651936027929603977}
 --- !u!1 &6547670165444650658
 GameObject:
   m_ObjectHideFlags: 0

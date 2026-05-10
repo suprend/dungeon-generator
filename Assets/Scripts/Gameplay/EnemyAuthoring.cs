@@ -16,6 +16,8 @@ public sealed class EnemyAuthoring : MonoBehaviour
     [SerializeField] private float reacquireInterval = 0.2f;
     [SerializeField] private float stopDistance = 0.6f;
 
+    private float runtimeStatsMultiplier = 1f;
+
     public int MaxHealth => Mathf.Max(1, maxHealth);
     public bool DestroyOnDeath => destroyOnDeath;
     public int ContactDamage => Mathf.Max(0, contactDamage);
@@ -35,10 +37,16 @@ public sealed class EnemyAuthoring : MonoBehaviour
 
     public void ApplyRuntimeConfiguration(LayerMask targetLayers)
     {
+        ApplyRuntimeConfiguration(targetLayers, 1f);
+    }
+
+    public void ApplyRuntimeConfiguration(LayerMask targetLayers, float statsMultiplier)
+    {
         ApplyAuthoringDefaults();
+        runtimeStatsMultiplier = Mathf.Max(0f, statsMultiplier);
 
         if (TryGetComponent<Health>(out var health))
-            health.Configure(MaxHealth, DestroyOnDeath);
+            health.Configure(GetScaledMaxHealth(), DestroyOnDeath);
 
         ApplyTargetLayers(targetLayers);
     }
@@ -46,7 +54,17 @@ public sealed class EnemyAuthoring : MonoBehaviour
     public void ApplyTargetLayers(LayerMask targetLayers)
     {
         if (TryGetComponent<ContactDamageDealer>(out var damageDealer))
-            damageDealer.Configure(ContactDamage, ContactHitCooldownSeconds, targetLayers);
+            damageDealer.Configure(GetScaledContactDamage(), ContactHitCooldownSeconds, targetLayers);
+    }
+
+    private int GetScaledMaxHealth()
+    {
+        return Mathf.Max(1, Mathf.RoundToInt(MaxHealth * Mathf.Max(0f, runtimeStatsMultiplier)));
+    }
+
+    private int GetScaledContactDamage()
+    {
+        return Mathf.Max(0, Mathf.RoundToInt(ContactDamage * Mathf.Max(0f, runtimeStatsMultiplier)));
     }
 
     private void ApplyAuthoringDefaults()

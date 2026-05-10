@@ -21,6 +21,7 @@ GameObject:
   - component: {fileID: 1800000000000000000}
   - component: {fileID: 1500000000000000000}
   - component: {fileID: 1600000000000000000}
+  - component: {fileID: 6348706716610139214}
   m_Layer: 0
   m_Name: Mage
   m_TagString: Untagged
@@ -38,7 +39,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -8.227187, y: 5.4555216, z: 0}
-  m_LocalScale: {x: 2.5, y: 2.5, z: 2.5}
+  m_LocalScale: {x: 2, y: 2, z: 2}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 5437482612350067080}
@@ -333,6 +334,24 @@ MonoBehaviour:
   playerClassRuntime: {fileID: 1500000000000000000}
   referenceResolution: {x: 1920, y: 1080}
   panelAnchorPosition: {x: 28, y: -28}
+--- !u!114 &6348706716610139214
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953530847934859495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61e2cbe2fe0fc4bfdba5c6dba9091bd6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  interactKey: 102
+  interactRadius: 1.25
+  interactableLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  playerController: {fileID: 2651936027929603977}
 --- !u!1 &6547670165444650658
 GameObject:
   m_ObjectHideFlags: 0

@@ -895,6 +895,7 @@ GameObject:
   - component: {fileID: 809282459}
   - component: {fileID: 809282463}
   - component: {fileID: 809282464}
+  - component: {fileID: 809282465}
   m_Layer: 0
   m_Name: graphBuilder
   m_TagString: Untagged
@@ -999,9 +1000,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   generatedLevelRuntime: {fileID: 809282458}
   navMeshRuntime: {fileID: 809282460}
+  runController: {fileID: 809282465}
   enemiesRoot: {fileID: 179483159}
   spawnOnBuild: 1
   destroyOldEnemiesOnRebuild: 1
+  defaultEnemyScore: 10
+  lockUnclearedEnemyRooms: 1
+  roomLockBlockerColor: {r: 0.15, g: 0.15, b: 0.18, a: 0.95}
+  verboseRoomLockLogs: 1
+  repeatedLogIntervalSeconds: 0.75
 --- !u!114 &809282460
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1095,6 +1102,30 @@ MonoBehaviour:
   exitButtonText: Exit
   restartKey: 114
   exitKey: 27
+--- !u!114 &809282465
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 809282454}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: be45598f97dd1482a89a433c70acadb1, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  graphMapBuilder: {fileID: 809282457}
+  generatedLevelRuntime: {fileID: 809282458}
+  levelEnemyController: {fileID: 809282459}
+  runHud: {fileID: 0}
+  exitPortalPrefab: {fileID: 0}
+  spawnExitIfMissing: 0
+  baseSeed: 1000
+  seedStep: 9973
+  currentLevel: 1
+  multiplierPerLevel: 0.5
+  enemyStatsMultiplierPerLevel: 0.25
+  buildFirstLevelOnStart: 0
 --- !u!1 &1103427778
 GameObject:
   m_ObjectHideFlags: 0

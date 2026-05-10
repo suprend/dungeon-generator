@@ -1,12 +1,16 @@
 using UnityEngine;
 using UnityEngine.AI;
+using System.Collections.Generic;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(TopDownPlayerController))]
+[RequireComponent(typeof(PlayerInteractor))]
 [RequireComponent(typeof(Health))]
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class PartyMemberRuntime : MonoBehaviour
 {
+    private static readonly List<PartyMemberRuntime> RegisteredMembers = new();
+
     [Header("Follow")]
     [SerializeField] private float followDistance = 1.8f;
     [SerializeField] private float teleportDistance = 10f;
@@ -15,6 +19,9 @@ public sealed class PartyMemberRuntime : MonoBehaviour
 
     [Header("Combat")]
     [SerializeField] private float attackDistance = 8f;
+    [SerializeField] private bool requireActiveRoomEnemy = true;
+    [SerializeField] private bool requireLineOfSight = true;
+    [SerializeField] private LayerMask lineOfSightMask = ~0;
 
     [Header("References")]
     [SerializeField] private TopDownPlayerController playerController;
@@ -29,8 +36,12 @@ public sealed class PartyMemberRuntime : MonoBehaviour
     private bool navMeshControlActive;
     private float nextRepathTime;
     private NavMeshPath navMeshPath;
+    private readonly RaycastHit2D[] lineOfSightHits = new RaycastHit2D[16];
 
+    public static IReadOnlyList<PartyMemberRuntime> ActiveMembers => RegisteredMembers;
+    public static PartyMemberRuntime ActiveControlledMember { get; private set; }
     public bool IsAlive => health == null || !health.IsDead;
+    public bool IsPlayerControlled { get; private set; }
 
     private void Reset()
     {
@@ -42,6 +53,19 @@ public sealed class PartyMemberRuntime : MonoBehaviour
         CacheComponents();
         if (navMeshPath == null)
             navMeshPath = new NavMeshPath();
+    }
+
+    private void OnEnable()
+    {
+        if (!RegisteredMembers.Contains(this))
+            RegisteredMembers.Add(this);
+    }
+
+    private void OnDisable()
+    {
+        RegisteredMembers.Remove(this);
+        if (ActiveControlledMember == this)
+            ActiveControlledMember = null;
     }
 
     private void OnDestroy()
@@ -74,6 +98,11 @@ public sealed class PartyMemberRuntime : MonoBehaviour
     public void SetPlayerControlled(bool isPlayerControlled)
     {
         CacheComponents();
+        IsPlayerControlled = isPlayerControlled;
+        if (isPlayerControlled)
+            ActiveControlledMember = this;
+        else if (ActiveControlledMember == this)
+            ActiveControlledMember = null;
 
         if (playerController != null)
         {
@@ -90,6 +119,26 @@ public sealed class PartyMemberRuntime : MonoBehaviour
             playerClassRuntime.SetPlayerInputEnabled(isPlayerControlled);
 
         SetNavMeshActive(!isPlayerControlled && IsAlive);
+    }
+
+    public void TeleportTo(Vector3 worldPosition)
+    {
+        CacheComponents();
+
+        if (body2D != null)
+        {
+            body2D.position = worldPosition;
+            body2D.velocity = Vector2.zero;
+        }
+
+        transform.position = worldPosition;
+        Physics2D.SyncTransforms();
+
+        if (navMeshAgent != null && navMeshAgent.enabled)
+            WarpAgentToCurrentPosition();
+
+        if (playerController != null)
+            playerController.SetExternalMoveInput(Vector2.zero);
     }
 
     public void TickCompanionAI(Transform leader, Vector2 formationOffset)
@@ -119,17 +168,7 @@ public sealed class PartyMemberRuntime : MonoBehaviour
         {
             if (partyOwner != null && partyOwner.TryGetSafeTeleportPosition(targetPosition, out var safeTeleportPosition))
             {
-                if (body2D != null)
-                {
-                    body2D.position = safeTeleportPosition;
-                    body2D.velocity = Vector2.zero;
-                }
-                else
-                {
-                    transform.position = safeTeleportPosition;
-                }
-
-                WarpAgentToCurrentPosition();
+                TeleportTo(safeTeleportPosition);
                 toTarget = Vector2.zero;
             }
         }
@@ -171,9 +210,15 @@ public sealed class PartyMemberRuntime : MonoBehaviour
             var enemy = activeEnemies[i];
             if (enemy == null || !enemy.IsAlive)
                 continue;
+            if (requireActiveRoomEnemy && !enemy.ActiveAI)
+                continue;
 
             var sqrDistance = ((Vector2)enemy.transform.position - (Vector2)transform.position).sqrMagnitude;
+            if (sqrDistance > attackDistance * attackDistance)
+                continue;
             if (sqrDistance >= bestSqrDistance)
+                continue;
+            if (requireLineOfSight && !HasLineOfSight(enemy))
                 continue;
 
             bestSqrDistance = sqrDistance;
@@ -181,6 +226,36 @@ public sealed class PartyMemberRuntime : MonoBehaviour
         }
 
         return bestEnemy;
+    }
+
+    private bool HasLineOfSight(EnemyAgentRuntime enemy)
+    {
+        if (enemy == null)
+            return false;
+
+        var origin = (Vector2)transform.position;
+        var target = (Vector2)enemy.transform.position;
+        var hitCount = Physics2D.LinecastNonAlloc(origin, target, lineOfSightHits, lineOfSightMask);
+
+        for (var i = 0; i < hitCount; i++)
+        {
+            var hit = lineOfSightHits[i];
+            var collider2D = hit.collider;
+            if (collider2D == null || collider2D.isTrigger)
+                continue;
+
+            var hitTransform = collider2D.transform;
+            if (hitTransform == null)
+                continue;
+            if (hitTransform.IsChildOf(transform) || hitTransform.IsChildOf(enemy.transform))
+                continue;
+            if (collider2D.GetComponentInParent<PartyMemberRuntime>() != null)
+                continue;
+
+            return false;
+        }
+
+        return true;
     }
 
     private void HandleDeath(Health _)
@@ -195,6 +270,9 @@ public sealed class PartyMemberRuntime : MonoBehaviour
 
     private void CacheComponents()
     {
+        if (!TryGetComponent<PlayerInteractor>(out _))
+            gameObject.AddComponent<PlayerInteractor>();
+
         if (playerController == null)
             playerController = GetComponent<TopDownPlayerController>();
         if (bowAttack == null)

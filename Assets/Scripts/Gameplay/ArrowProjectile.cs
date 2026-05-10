@@ -12,6 +12,7 @@ public sealed class ArrowProjectile : MonoBehaviour
     [SerializeField] private int damage = 1;
     [SerializeField] private float lifetimeSeconds = 1.5f;
     [SerializeField] private bool destroyOnAnySolidHit = true;
+    [SerializeField] private int visualSortingOrder = 80;
 
     private Health ownerHealth;
     private Transform ownerRoot;
@@ -151,7 +152,7 @@ public sealed class ArrowProjectile : MonoBehaviour
             hitCollider.isTrigger = true;
 
         if (spriteRenderer != null)
-            spriteRenderer.sortingOrder = Mathf.Max(spriteRenderer.sortingOrder, 400);
+            spriteRenderer.sortingOrder = visualSortingOrder;
     }
 
     private void IgnoreOwnerColliders()

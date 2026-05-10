@@ -403,13 +403,54 @@ public partial class MapGraphLevelSolver
         {
             foreach (var placement in placementStack)
             {
-                if (placement.Meta != null)
-                    UnityEngine.Object.Destroy(placement.Meta.gameObject);
+                if (placement.Meta == null)
+                    continue;
+
+                PreserveInteractables(placement.Meta.transform);
+                UnityEngine.Object.Destroy(placement.Meta.gameObject);
             }
             placementStack.Clear();
             placedNodes.Clear();
             occupiedFloor.Clear();
             occupiedWall.Clear();
+        }
+
+        private void PreserveInteractables(Transform roomRoot)
+        {
+            if (roomRoot == null)
+                return;
+
+            var preservedRoots = new HashSet<Transform>();
+            var targetParent = roomRoot.parent;
+            var behaviours = roomRoot.GetComponentsInChildren<MonoBehaviour>(true);
+
+            for (var i = 0; i < behaviours.Length; i++)
+            {
+                if (behaviours[i] is not IInteractable)
+                    continue;
+
+                var interactableRoot = behaviours[i].transform;
+                if (interactableRoot == roomRoot || !preservedRoots.Add(interactableRoot))
+                    continue;
+
+                interactableRoot.SetParent(targetParent, true);
+                if (!interactableRoot.TryGetComponent<LevelRuntimeObject>(out _))
+                    interactableRoot.gameObject.AddComponent<LevelRuntimeObject>();
+                RestoreRuntimeObjectVisibility(interactableRoot);
+            }
+        }
+
+        private static void RestoreRuntimeObjectVisibility(Transform root)
+        {
+            if (root == null)
+                return;
+
+            var spriteRenderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+            for (var i = 0; i < spriteRenderers.Length; i++)
+            {
+                if (spriteRenderers[i] != null)
+                    spriteRenderers[i].enabled = true;
+            }
         }
 
         public void Cleanup()

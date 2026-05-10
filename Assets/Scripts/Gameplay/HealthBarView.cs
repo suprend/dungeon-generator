@@ -68,8 +68,8 @@ public sealed class HealthBarView : MonoBehaviour
 
         barRoot.position = transform.position + Vector3.up * cachedYOffset;
         barRoot.localScale = new Vector3(
-            SafeInverseScale(transform.lossyScale.x),
-            SafeInverseScale(transform.lossyScale.y),
+            SignedInverseScale(transform.lossyScale.x),
+            SignedInverseScale(transform.lossyScale.y),
             1f);
     }
 
@@ -196,9 +196,9 @@ public sealed class HealthBarView : MonoBehaviour
         return Mathf.Max(worldYOffset, maxTop - transform.position.y + 0.08f);
     }
 
-    private static float SafeInverseScale(float value)
+    private static float SignedInverseScale(float value)
     {
-        return Mathf.Abs(value) > 0.0001f ? 1f / Mathf.Abs(value) : 1f;
+        return Mathf.Abs(value) > 0.0001f ? 1f / value : 1f;
     }
 
     private static Sprite GetSharedSprite()

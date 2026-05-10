@@ -37,27 +37,27 @@ MonoBehaviour:
     label: Shop
     roomType: {fileID: 11400000, guid: 8f1b74222788e44968d734ee41e9d2c6, type: 2}
     notes: 
-    position: {x: 661.52, y: 178.5}
-  - id: df4d330a03cb48d897026d0dc5603f1c
-    label: Boss
-    roomType: {fileID: 11400000, guid: 7161bdcbeb6e64dd39a248cd37d5db91, type: 2}
-    notes: 
-    position: {x: 321.37097, y: -190.20427}
+    position: {x: 692.4001, y: 179.6}
   - id: 5a457bbae7cc4adaa0e55f76f628ce51
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
     position: {x: 485.08676, y: -171.05913}
   - id: aab04a7b62ea41a385e9b98b4df62246
-    label: Chest
+    label: End
     roomType: {fileID: 11400000, guid: 34bcc1fada6ac407889ad9f925780410, type: 2}
     notes: 
-    position: {x: 647.5, y: -181}
+    position: {x: 647.5001, y: -181.00002}
   - id: def3dd3190da458d97951711e0543c0a
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
     position: {x: 288.79724, y: -81.905525}
+  - id: b028e5960d6c4fac941d3a1dca0d8a68
+    label: shop
+    roomType: {fileID: 11400000, guid: 8f1b74222788e44968d734ee41e9d2c6, type: 2}
+    notes: 
+    position: {x: 191.50002, y: -12.499992}
   edges:
   - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
     toNodeId: a4eae09f5d474e819ff8ba25c6c49887
@@ -80,11 +80,8 @@ MonoBehaviour:
   - fromNodeId: aab04a7b62ea41a385e9b98b4df62246
     toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: def3dd3190da458d97951711e0543c0a
-    toNodeId: df4d330a03cb48d897026d0dc5603f1c
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: df4d330a03cb48d897026d0dc5603f1c
-    toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
+  - fromNodeId: b028e5960d6c4fac941d3a1dca0d8a68
+    toNodeId: def3dd3190da458d97951711e0543c0a
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
   defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

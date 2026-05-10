@@ -9,6 +9,7 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
 {
     [SerializeField] private GraphMapBuilder graphMapBuilder;
     [SerializeField] private bool spawnPlayerAfterBuild;
+    [SerializeField] private bool preserveSpawnedPlayerOnRebuild;
     [SerializeField] private GameObject playerPrefab;
     [SerializeField] private List<GameObject> partyMemberPrefabs = new();
     [SerializeField] private bool allowCompanionTeleportToExploredRooms;
@@ -22,6 +23,11 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
     public GraphMapBuilder GraphMapBuilder => graphMapBuilder;
     public IReadOnlyList<GeneratedRoomInfo> LastGeneratedRooms => graphMapBuilder != null ? graphMapBuilder.LastGeneratedRooms : EmptyRooms;
     public GameObject SpawnedPlayerInstance => spawnedPlayerInstance;
+    public bool PreserveSpawnedPlayerOnRebuild
+    {
+        get => preserveSpawnedPlayerOnRebuild;
+        set => preserveSpawnedPlayerOnRebuild = value;
+    }
     public event Action GeneratedRoomsChanged;
     public event Action<GameObject> PlayerSpawned;
 
@@ -96,11 +102,24 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
         return true;
     }
 
+    public bool TryMoveSpawnedPlayerToStartRoom()
+    {
+        if (spawnedPlayerInstance == null)
+            return false;
+        if (!TryGetStartRoom(out var startRoom))
+            return false;
+
+        MoveSpawnedPlayerTo(startRoom.SpawnWorldPosition);
+        TryBindCinemachineTarget(spawnedPlayerInstance.transform);
+        PlayerSpawned?.Invoke(spawnedPlayerInstance);
+        return true;
+    }
+
     private void HandleGeneratedRoomsChanged()
     {
         RebuildRoomLookup();
-        GeneratedRoomsChanged?.Invoke();
         TrySpawnPlayer();
+        GeneratedRoomsChanged?.Invoke();
     }
 
     private void RebuildRoomLookup()
@@ -133,21 +152,17 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             return;
         }
 
-        GeneratedRoomInfo startRoom = null;
-        var rooms = LastGeneratedRooms;
-        for (var i = 0; i < rooms.Count; i++)
-        {
-            var room = rooms[i];
-            if (room != null && room.IsStartRoom && !room.IsConnector)
-            {
-                startRoom = room;
-                break;
-            }
-        }
-
-        if (startRoom == null)
+        if (!TryGetStartRoom(out var startRoom))
         {
             Debug.LogWarning("[GeneratedLevelRuntime] No generated room has StartRoomSpawn; player was not spawned.");
+            return;
+        }
+
+        if (spawnedPlayerInstance != null && preserveSpawnedPlayerOnRebuild)
+        {
+            MoveSpawnedPlayerTo(startRoom.SpawnWorldPosition);
+            TryBindCinemachineTarget(spawnedPlayerInstance.transform);
+            PlayerSpawned?.Invoke(spawnedPlayerInstance);
             return;
         }
 
@@ -208,6 +223,63 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             return null;
 
         return Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
+    }
+
+    private void MoveSpawnedPlayerTo(Vector3 spawnPosition)
+    {
+        if (spawnedPlayerInstance == null)
+            return;
+
+        if (spawnedPlayerInstance.TryGetComponent<PlayerPartyController>(out var partyController))
+        {
+            partyController.SetGeneratedLevelRuntime(this);
+            partyController.SetAllowCompanionTeleportToExploredRooms(allowCompanionTeleportToExploredRooms);
+            partyController.TeleportParty(spawnPosition);
+
+            if (spawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var partyTracker))
+            {
+                partyTracker.SetGeneratedLevelRuntime(this);
+                partyTracker.RefreshRoomNow();
+            }
+
+            return;
+        }
+
+        if (spawnedPlayerInstance.TryGetComponent<Rigidbody2D>(out var body2D))
+        {
+            body2D.position = spawnPosition;
+            body2D.velocity = Vector2.zero;
+        }
+        else
+        {
+            spawnedPlayerInstance.transform.position = spawnPosition;
+        }
+
+        if (spawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var playerRoomTracker))
+        {
+            playerRoomTracker.SetGeneratedLevelRuntime(this);
+            playerRoomTracker.RefreshRoomNow();
+        }
+    }
+
+    private bool TryGetStartRoom(out GeneratedRoomInfo startRoom)
+    {
+        startRoom = null;
+        var rooms = LastGeneratedRooms;
+        if (rooms == null)
+            return false;
+
+        for (var i = 0; i < rooms.Count; i++)
+        {
+            var room = rooms[i];
+            if (room == null || !room.IsStartRoom || room.IsConnector)
+                continue;
+
+            startRoom = room;
+            return true;
+        }
+
+        return false;
     }
 
     private GameObject SpawnParty(Vector3 spawnPosition)

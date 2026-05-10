@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 [DisallowMultipleComponent]
 public sealed class PlayerPartyController : MonoBehaviour
@@ -8,6 +9,9 @@ public sealed class PlayerPartyController : MonoBehaviour
     [SerializeField] private KeyCode nextCharacterKey = KeyCode.E;
     [SerializeField] private float companionTrailSpacing = 1.1f;
     [SerializeField] private float trailPointSpacing = 0.25f;
+    [SerializeField] private float companionTeleportSeparation = 0.8f;
+    [SerializeField] private float companionTeleportSearchRadius = 3f;
+    [SerializeField] private float companionTeleportNavMeshSampleRadius = 0.45f;
     private bool allowCompanionTeleportToExploredRooms;
 
     private readonly List<PartyMemberRuntime> members = new();
@@ -149,6 +153,139 @@ public sealed class PlayerPartyController : MonoBehaviour
         allowCompanionTeleportToExploredRooms = allowTeleport;
     }
 
+    public void TeleportParty(Vector3 spawnPosition)
+    {
+        RemoveDeadMembers();
+
+        for (var i = 0; i < members.Count; i++)
+        {
+            var member = members[i];
+            if (member == null)
+                continue;
+
+            member.TeleportTo(spawnPosition + (Vector3)GetSpawnOffset(i));
+        }
+
+        ResetActiveTrail();
+        ApplyPartyState();
+        transform.position = spawnPosition;
+        RefreshExploredRooms();
+    }
+
+    public int TeleportCompanionsToActiveMember(GeneratedRoomInfo requiredRoom = null)
+    {
+        if (ActiveMember == null || !ActiveMember.IsAlive)
+            activeMemberIndex = FindFirstLivingMemberIndex();
+
+        var activeMember = ActiveMember;
+        if (activeMember == null)
+            return 0;
+
+        var anchor = activeMember.transform.position;
+        var occupiedPositions = new List<Vector3> { anchor };
+        var teleportedCount = 0;
+        for (var i = 0; i < members.Count; i++)
+        {
+            var member = members[i];
+            if (member == null || member == activeMember || !member.IsAlive)
+                continue;
+
+            if (!TryGetCompanionTeleportPosition(anchor, requiredRoom, occupiedPositions, i, out var teleportPosition))
+                teleportPosition = anchor;
+
+            member.TeleportTo(teleportPosition);
+            occupiedPositions.Add(teleportPosition);
+            teleportedCount++;
+        }
+
+        ResetActiveTrail();
+        ApplyPartyState();
+        SyncAnchorTransform();
+        RefreshExploredRooms();
+        return teleportedCount;
+    }
+
+    private bool TryGetCompanionTeleportPosition(
+        Vector3 anchor,
+        GeneratedRoomInfo requiredRoom,
+        List<Vector3> occupiedPositions,
+        int memberIndex,
+        out Vector3 teleportPosition)
+    {
+        var preferredOffset = GetSpawnOffset(memberIndex);
+        if (preferredOffset.sqrMagnitude <= 0.0001f)
+            preferredOffset = GetFormationOffset(memberIndex);
+
+        if (TryAcceptTeleportCandidate(anchor + (Vector3)preferredOffset, requiredRoom, occupiedPositions, out teleportPosition))
+            return true;
+
+        var maxRadius = Mathf.Max(0.5f, companionTeleportSearchRadius);
+        var minRadius = Mathf.Max(0.35f, companionTeleportSeparation);
+        var radiusStep = Mathf.Max(0.25f, companionTeleportSeparation * 0.5f);
+        var angleOffset = memberIndex * 47f;
+
+        for (var radius = minRadius; radius <= maxRadius; radius += radiusStep)
+        {
+            var samples = Mathf.Max(8, Mathf.CeilToInt(radius * 8f));
+            for (var sample = 0; sample < samples; sample++)
+            {
+                var angle = (angleOffset + sample * (360f / samples)) * Mathf.Deg2Rad;
+                var candidate = anchor + new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * radius;
+                if (TryAcceptTeleportCandidate(candidate, requiredRoom, occupiedPositions, out teleportPosition))
+                    return true;
+            }
+        }
+
+        teleportPosition = anchor;
+        return false;
+    }
+
+    private bool TryAcceptTeleportCandidate(
+        Vector3 candidate,
+        GeneratedRoomInfo requiredRoom,
+        List<Vector3> occupiedPositions,
+        out Vector3 teleportPosition)
+    {
+        teleportPosition = candidate;
+
+        if (!NavMesh.SamplePosition(
+                candidate,
+                out var hit,
+                Mathf.Max(0.05f, companionTeleportNavMeshSampleRadius),
+                NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        teleportPosition = hit.position;
+        teleportPosition.z = candidate.z;
+
+        if (!IsTeleportPositionInRequiredRoom(teleportPosition, requiredRoom))
+            return false;
+
+        var minSqrDistance = Mathf.Max(0.05f, companionTeleportSeparation);
+        minSqrDistance *= minSqrDistance;
+        for (var i = 0; i < occupiedPositions.Count; i++)
+        {
+            if (((Vector2)occupiedPositions[i] - (Vector2)teleportPosition).sqrMagnitude < minSqrDistance)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool IsTeleportPositionInRequiredRoom(Vector3 teleportPosition, GeneratedRoomInfo requiredRoom)
+    {
+        if (requiredRoom == null)
+            return true;
+        if (generatedLevelRuntime == null)
+            return false;
+        if (!generatedLevelRuntime.TryGetRoomAtWorldPosition(teleportPosition, out var roomInfo) || roomInfo == null)
+            return false;
+
+        return string.Equals(roomInfo.NodeId, requiredRoom.NodeId, System.StringComparison.Ordinal);
+    }
+
     public bool TryGetSafeTeleportPosition(Vector3 desiredWorldPosition, out Vector3 safeWorldPosition)
     {
         safeWorldPosition = desiredWorldPosition;
@@ -220,6 +357,27 @@ public sealed class PlayerPartyController : MonoBehaviour
     private bool HasLivingMembers()
     {
         return FindFirstLivingMemberIndex() >= 0;
+    }
+
+    private void RemoveDeadMembers()
+    {
+        var activeBeforeCleanup = ActiveMember;
+
+        for (var i = members.Count - 1; i >= 0; i--)
+        {
+            var member = members[i];
+            if (member != null && member.IsAlive)
+                continue;
+
+            members.RemoveAt(i);
+            if (member != null)
+                Destroy(member.gameObject);
+        }
+
+        if (activeBeforeCleanup != null && activeBeforeCleanup.IsAlive)
+            activeMemberIndex = members.IndexOf(activeBeforeCleanup);
+        if (activeMemberIndex < 0 || activeMemberIndex >= members.Count)
+            activeMemberIndex = FindFirstLivingMemberIndex();
     }
 
     private int FindFirstLivingMemberIndex()

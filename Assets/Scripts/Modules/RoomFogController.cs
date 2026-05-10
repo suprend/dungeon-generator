@@ -31,8 +31,6 @@ public sealed class RoomFogController : MonoBehaviour
         TryAttachSpawnedPlayerTracker();
 
         HandleGeneratedRoomsChanged();
-        if (playerRoomTracker != null && playerRoomTracker.CurrentRoom != null)
-            RevealRoom(playerRoomTracker.CurrentRoom, playerRoomTracker.transform.position, instant: false);
     }
 
     private void OnDisable()
@@ -44,18 +42,14 @@ public sealed class RoomFogController : MonoBehaviour
 
         AttachTracker(null);
 
-        foreach (var routine in revealRoutines.Values)
-        {
-            if (routine != null)
-                StopCoroutine(routine);
-        }
-        revealRoutines.Clear();
+        StopRevealRoutines();
         ClearActiveRevealObjects();
     }
 
     private void HandleGeneratedRoomsChanged()
     {
         RebuildFog();
+        RevealCurrentPlayerRoom(instant: false);
     }
 
     private void HandlePlayerSpawned(GameObject playerInstance)
@@ -66,8 +60,7 @@ public sealed class RoomFogController : MonoBehaviour
         playerInstance.TryGetComponent<PlayerRoomTracker>(out var spawnedTracker);
         AttachTracker(spawnedTracker);
 
-        if (playerRoomTracker != null && playerRoomTracker.CurrentRoom != null)
-            RevealRoom(playerRoomTracker.CurrentRoom, playerRoomTracker.transform.position, instant: false);
+        RevealCurrentPlayerRoom(instant: false);
     }
 
     private void HandleEnteredRoom(GeneratedRoomInfo roomInfo)
@@ -82,6 +75,18 @@ public sealed class RoomFogController : MonoBehaviour
 
         generatedLevelRuntime.SpawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var spawnedTracker);
         AttachTracker(spawnedTracker);
+    }
+
+    private void RevealCurrentPlayerRoom(bool instant)
+    {
+        if (playerRoomTracker == null)
+            TryAttachSpawnedPlayerTracker();
+        if (playerRoomTracker == null)
+            return;
+
+        playerRoomTracker.RefreshRoomNow();
+        if (playerRoomTracker.CurrentRoom != null)
+            RevealRoom(playerRoomTracker.CurrentRoom, playerRoomTracker.transform.position, instant);
     }
 
     private void AttachTracker(PlayerRoomTracker tracker)
@@ -101,6 +106,7 @@ public sealed class RoomFogController : MonoBehaviour
             return;
 
         fogMap.ClearAllTiles();
+        StopRevealRoutines();
         fogCellsByRoom.Clear();
         revealedRooms.Clear();
         ClearActiveRevealObjects();
@@ -262,6 +268,17 @@ public sealed class RoomFogController : MonoBehaviour
         var roomIds = new List<string>(activeOverlays.Keys);
         for (var i = 0; i < roomIds.Count; i++)
             CleanupRevealObjects(roomIds[i]);
+    }
+
+    private void StopRevealRoutines()
+    {
+        foreach (var routine in revealRoutines.Values)
+        {
+            if (routine != null)
+                StopCoroutine(routine);
+        }
+
+        revealRoutines.Clear();
     }
 
     private void CleanupRevealObjects(string roomNodeId)

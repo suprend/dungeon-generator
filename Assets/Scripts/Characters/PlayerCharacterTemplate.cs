@@ -30,6 +30,9 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private static Material circleVisualMaterial;
     [Header("Управление")]
     [SerializeField] private PlayerCharacterControlState controlState = PlayerCharacterControlState.PlayerControlled;
+    [SerializeField] private KeyCode interactKey = KeyCode.F;
+    [SerializeField, Min(0.05f)] private float interactRadius = 1.25f;
+    [SerializeField] private LayerMask interactableLayers = ~0;
 
     [Header("Статы персонажа")]
     [SerializeField, Min(1f)] private float maxHealth = 100f;
@@ -110,8 +113,11 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private SpriteRenderer[] abilityCooldownBackgroundRenderers;
     private SpriteRenderer[] abilityCooldownFillRenderers;
     private Vector2 movementInput;
+    private Vector2 externalAiMovementInput;
     private Vector2 lastMovementInputDirection = Vector2.right;
     private Vector2 damageKnockbackVelocity;
+    private readonly Collider2D[] interactionOverlapResults = new Collider2D[16];
+    private IInteractable currentInteractable;
     private Coroutine damageResistanceCoroutine;
     private Coroutine movementSpeedMultiplierCoroutine;
     private Coroutine damageBonusCoroutine;
@@ -189,7 +195,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
     protected virtual void OnDestroy()
     {
+        InteractionPromptHud.Hide(this);
         ActivePlayerCharacters.Remove(this);
+    }
+
+    protected virtual void OnDisable()
+    {
+        InteractionPromptHud.Hide(this);
+        currentInteractable = null;
     }
 
     protected virtual void Update()
@@ -199,12 +212,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         if (!IsAlive)
         {
             movementInput = Vector2.zero;
+            ClearCurrentInteractable();
             return;
         }
 
         if (IsAiControlled)
         {
             movementInput = Vector2.zero;
+            ClearCurrentInteractable();
             UpdateAiControl();
             return;
         }
@@ -212,6 +227,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         ReadMovementInput();
         ReadAbilityInput();
         ReadCharacterSpecificInput();
+        UpdateInteractionInput();
     }
 
     protected virtual void FixedUpdate()
@@ -239,6 +255,37 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         movementInput = Vector2.zero;
 
         OnControlStateChanged(previousControlState, controlState);
+    }
+
+    public void SetExternalAiMovementInput(Vector2 input)
+    {
+        externalAiMovementInput = input.sqrMagnitude > 1f ? input.normalized : input;
+
+        if (externalAiMovementInput.sqrMagnitude > 0.0001f)
+        {
+            lastMovementInputDirection = externalAiMovementInput.normalized;
+        }
+    }
+
+    public void TeleportTo(Vector3 worldPosition)
+    {
+        if (characterRigidbody == null)
+        {
+            characterRigidbody = GetComponent<Rigidbody2D>();
+        }
+
+        damageKnockbackVelocity = Vector2.zero;
+        externalAiMovementInput = Vector2.zero;
+        movementInput = Vector2.zero;
+
+        if (characterRigidbody != null)
+        {
+            characterRigidbody.position = worldPosition;
+            characterRigidbody.velocity = Vector2.zero;
+        }
+
+        transform.position = worldPosition;
+        Physics2D.SyncTransforms();
     }
 
     /// <summary>
@@ -285,6 +332,122 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     {
     }
 
+    private void UpdateInteractionInput()
+    {
+        RefreshCurrentInteractable();
+        UpdateInteractionPromptHud();
+
+        if (currentInteractable == null || !Input.GetKeyDown(interactKey))
+            return;
+
+        currentInteractable.Interact(gameObject);
+        RefreshCurrentInteractable();
+        UpdateInteractionPromptHud();
+    }
+
+    private void RefreshCurrentInteractable()
+    {
+        currentInteractable = null;
+
+        int hitCount = Physics2D.OverlapCircleNonAlloc(
+            transform.position,
+            Mathf.Max(0.05f, interactRadius),
+            interactionOverlapResults,
+            interactableLayers);
+
+        float bestSqrDistance = float.MaxValue;
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider2D hit = interactionOverlapResults[i];
+            if (hit == null || hit.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            IInteractable interactable = FindInteractable(hit);
+            if (interactable == null || !interactable.CanInteract(gameObject))
+            {
+                continue;
+            }
+
+            float sqrDistance = ((Vector2)hit.transform.position - (Vector2)transform.position).sqrMagnitude;
+            if (sqrDistance >= bestSqrDistance)
+            {
+                continue;
+            }
+
+            bestSqrDistance = sqrDistance;
+            currentInteractable = interactable;
+        }
+    }
+
+    private static IInteractable FindInteractable(Collider2D hit)
+    {
+        if (hit == null)
+        {
+            return null;
+        }
+
+        MonoBehaviour[] components = hit.GetComponentsInParent<MonoBehaviour>(true);
+        for (int i = 0; i < components.Length; i++)
+        {
+            if (components[i] is IInteractable interactable)
+            {
+                return interactable;
+            }
+        }
+
+        components = hit.GetComponentsInChildren<MonoBehaviour>(true);
+        for (int i = 0; i < components.Length; i++)
+        {
+            if (components[i] is IInteractable interactable)
+            {
+                return interactable;
+            }
+        }
+
+        return null;
+    }
+
+    private void UpdateInteractionPromptHud()
+    {
+        if (currentInteractable == null)
+        {
+            InteractionPromptHud.Hide(this);
+            return;
+        }
+
+        string prompt = string.IsNullOrWhiteSpace(currentInteractable.InteractionPrompt)
+            ? $"Press {FormatKey(interactKey)} to interact"
+            : currentInteractable.InteractionPrompt;
+
+        InteractionPromptHud.Show(this, prompt);
+    }
+
+    private void ClearCurrentInteractable()
+    {
+        currentInteractable = null;
+        InteractionPromptHud.Hide(this);
+    }
+
+    private static string FormatKey(KeyCode key)
+    {
+        return key switch
+        {
+            KeyCode.Alpha0 => "0",
+            KeyCode.Alpha1 => "1",
+            KeyCode.Alpha2 => "2",
+            KeyCode.Alpha3 => "3",
+            KeyCode.Alpha4 => "4",
+            KeyCode.Alpha5 => "5",
+            KeyCode.Alpha6 => "6",
+            KeyCode.Alpha7 => "7",
+            KeyCode.Alpha8 => "8",
+            KeyCode.Alpha9 => "9",
+            _ => key == KeyCode.None ? "-" : key.ToString()
+        };
+    }
+
     /// <summary>
     /// Заглушка логики ИИ
     /// </summary>
@@ -313,9 +476,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     /// </summary>
     private void MoveCharacter()
     {
-        Vector2 inputVelocity = IsPlayerControlled && !HasActiveDamageKnockback()
-            ? movementInput * MovementSpeed
-            : Vector2.zero;
+        Vector2 inputVelocity = Vector2.zero;
+        if (!HasActiveDamageKnockback())
+        {
+            inputVelocity = IsPlayerControlled
+                ? movementInput * MovementSpeed
+                : externalAiMovementInput * MovementSpeed;
+        }
+
         Vector2 nextPosition = characterRigidbody.position + (inputVelocity + damageKnockbackVelocity) * Time.fixedDeltaTime;
 
         characterRigidbody.MovePosition(nextPosition);
@@ -553,6 +721,42 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         }
 
         return closestEnemy;
+    }
+
+    protected Component FindClosestAliveDamageableComponent(float searchRadius, LayerMask searchLayers)
+    {
+        Collider2D[] hitColliders = Physics2D.OverlapCircleAll(transform.position, searchRadius, searchLayers);
+        HashSet<IDamageable> checkedTargets = new HashSet<IDamageable>();
+        Component closestTarget = null;
+        float closestSqrDistance = float.PositiveInfinity;
+
+        foreach (Collider2D hitCollider in hitColliders)
+        {
+            IDamageable target = hitCollider.GetComponentInParent<IDamageable>();
+
+            if (!CanPlayerAttackDamageTarget(target) || !checkedTargets.Add(target))
+            {
+                continue;
+            }
+
+            Component targetComponent = target as Component;
+            if (targetComponent == null)
+            {
+                continue;
+            }
+
+            float sqrDistance = ((Vector2)targetComponent.transform.position - (Vector2)transform.position).sqrMagnitude;
+
+            if (sqrDistance >= closestSqrDistance)
+            {
+                continue;
+            }
+
+            closestSqrDistance = sqrDistance;
+            closestTarget = targetComponent;
+        }
+
+        return closestTarget;
     }
 
     /// <summary>

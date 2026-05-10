@@ -189,6 +189,10 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             partyController.SetGeneratedLevelRuntime(this);
             partyController.SetAllowCompanionTeleportToExploredRooms(allowCompanionTeleportToExploredRooms);
         }
+        else if (spawnedPlayerInstance.TryGetComponent<PlayerCharacterSwitcher>(out var characterSwitcher))
+        {
+            characterSwitcher.SetGeneratedLevelRuntime(this);
+        }
 
         if (!shouldSpawnParty)
         {
@@ -245,6 +249,20 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             return;
         }
 
+        if (spawnedPlayerInstance.TryGetComponent<PlayerCharacterSwitcher>(out var characterSwitcher))
+        {
+            characterSwitcher.SetGeneratedLevelRuntime(this);
+            characterSwitcher.TeleportParty(spawnPosition);
+
+            if (spawnedPlayerInstance.TryGetComponent<PlayerRoomTracker>(out var characterPartyTracker))
+            {
+                characterPartyTracker.SetGeneratedLevelRuntime(this);
+                characterPartyTracker.RefreshRoomNow();
+            }
+
+            return;
+        }
+
         if (spawnedPlayerInstance.TryGetComponent<Rigidbody2D>(out var body2D))
         {
             body2D.position = spawnPosition;
@@ -287,8 +305,9 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
         var partyRoot = new GameObject("PlayerParty");
         partyRoot.transform.position = spawnPosition;
 
-        var partyController = partyRoot.AddComponent<PlayerPartyController>();
         var memberInstances = new List<GameObject>();
+        var usesPlayerCharacterTemplate = false;
+        var usesPartyMemberRuntime = false;
 
         for (var i = 0; i < partyMemberPrefabs.Count; i++)
         {
@@ -296,12 +315,14 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             if (memberPrefab == null)
                 continue;
 
-            var memberSpawnPosition = spawnPosition + (Vector3)PlayerPartyController.GetSpawnOffset(memberInstances.Count);
+            var memberSpawnPosition = spawnPosition + (Vector3)PlayerCharacterSwitcher.GetSpawnOffset(memberInstances.Count);
             var memberInstance = Instantiate(memberPrefab, memberSpawnPosition, Quaternion.identity);
 
             if (memberInstance.TryGetComponent<PlayerRoomTracker>(out var playerRoomTracker))
                 playerRoomTracker.enabled = false;
 
+            usesPlayerCharacterTemplate |= memberInstance.TryGetComponent<PlayerCharacterTemplate>(out _);
+            usesPartyMemberRuntime |= memberInstance.TryGetComponent<PartyMemberRuntime>(out _);
             memberInstances.Add(memberInstance);
         }
 
@@ -311,7 +332,17 @@ public sealed class GeneratedLevelRuntime : MonoBehaviour
             return null;
         }
 
-        partyController.Initialize(memberInstances);
+        if (usesPlayerCharacterTemplate && !usesPartyMemberRuntime)
+        {
+            var characterSwitcher = partyRoot.AddComponent<PlayerCharacterSwitcher>();
+            characterSwitcher.Initialize(memberInstances);
+        }
+        else
+        {
+            var partyController = partyRoot.AddComponent<PlayerPartyController>();
+            partyController.Initialize(memberInstances);
+        }
+
         return partyRoot;
     }
 

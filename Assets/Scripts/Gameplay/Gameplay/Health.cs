@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-public sealed class Health : MonoBehaviour
+public sealed class Health : MonoBehaviour, IDamageable
 {
     [SerializeField] private int maxHealth = 10;
     [SerializeField] private bool destroyOnDeath = true;
@@ -14,6 +14,7 @@ public sealed class Health : MonoBehaviour
     public int CurrentHealth => currentHealth;
     public float NormalizedHealth => MaxHealth > 0 ? currentHealth / (float)MaxHealth : 0f;
     public bool IsDead => isDead;
+    public bool IsAlive => !isDead;
     public event Action<Health> Changed;
     public event Action<Health> Died;
 
@@ -50,6 +51,11 @@ public sealed class Health : MonoBehaviour
             Destroy(gameObject);
         else
             Debug.Log($"[Health] {name} died.");
+    }
+
+    public void TakeDamage(float damageAmount)
+    {
+        ApplyDamage(Mathf.Max(0, Mathf.RoundToInt(damageAmount)));
     }
 
     public void Heal(int amount)

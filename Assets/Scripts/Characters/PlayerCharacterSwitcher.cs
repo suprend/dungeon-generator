@@ -13,6 +13,11 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     [SerializeField, Min(0)] private int startCharacterIndex;
     [SerializeField] private bool findCharactersOnStart = true;
 
+    [Header("Следование партии")]
+    [SerializeField, Min(0f)] private float companionTrailSpacing = 1.1f;
+    [SerializeField, Min(0.01f)] private float trailPointSpacing = 0.25f;
+    [SerializeField, Min(0f)] private float companionTeleportDistance = 8f;
+
     [Header("Воскрешение")]
     [SerializeField, Min(0f)] private float resurrectionRange = 1.5f;
     [SerializeField, Min(0f)] private float resurrectionFillPerPress = 0.18f;
@@ -44,15 +49,26 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     private TextMesh resurrectionPromptTextMesh;
     private MeshRenderer resurrectionPromptRenderer;
     private float resurrectionProgress;
+    private readonly HashSet<string> exploredRoomNodeIds = new HashSet<string>();
+    private readonly List<Vector2> activeTrailPoints = new List<Vector2>();
+    private GeneratedLevelRuntime generatedLevelRuntime;
+    private PlayerRoomTracker playerRoomTracker;
+    private PlayerCharacterTemplate trailOwner;
+    private PlayerCharacterTemplate lastActiveCharacter;
+    private bool ownsSpawnedCharacters;
+    private bool hasShownPartyDeathMenu;
 
     public PlayerCharacterTemplate CurrentCharacter =>
         IsCharacterIndexValid(currentCharacterIndex) ? characters[currentCharacterIndex] : null;
+    public IReadOnlyList<PlayerCharacterTemplate> Characters => characters;
 
     private void Start()
     {
         PrepareCharacterList();
+        CacheRuntimeReferences();
         CreateResurrectionBarVisual();
         SelectStartCharacter();
+        SyncAnchorTransform();
     }
 
     private void Update()
@@ -74,6 +90,34 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         {
             SwitchToNextCharacter();
         }
+
+        CacheRuntimeReferences();
+        RefreshExploredRooms();
+        TickCompanionFollow();
+        SyncAnchorTransform();
+    }
+
+    private void LateUpdate()
+    {
+        SyncAnchorTransform();
+    }
+
+    private void OnDestroy()
+    {
+        AttachTracker(null);
+
+        if (!ownsSpawnedCharacters)
+        {
+            return;
+        }
+
+        for (int i = 0; i < characters.Count; i++)
+        {
+            if (characters[i] != null)
+            {
+                Destroy(characters[i].gameObject);
+            }
+        }
     }
 
     /// <summary>
@@ -90,6 +134,129 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     public void SwitchToNextCharacter()
     {
         SwitchCharacter(1);
+    }
+
+    public static Vector2 GetSpawnOffset(int index)
+    {
+        return index switch
+        {
+            0 => new Vector2(0f, 0f),
+            1 => new Vector2(-0.8f, -0.65f),
+            2 => new Vector2(0.8f, -0.65f),
+            3 => new Vector2(0f, -1.2f),
+            _ => Vector2.zero
+        };
+    }
+
+    public static Vector2 GetFormationOffset(int index)
+    {
+        return index switch
+        {
+            0 => new Vector2(0f, 0f),
+            1 => new Vector2(-1.5f, -1.25f),
+            2 => new Vector2(1.5f, -1.25f),
+            3 => new Vector2(0f, -2.2f),
+            _ => Vector2.zero
+        };
+    }
+
+    public void Initialize(IReadOnlyList<GameObject> memberInstances)
+    {
+        characters.Clear();
+        exploredRoomNodeIds.Clear();
+        ResetActiveTrail();
+        lastActiveCharacter = null;
+        ownsSpawnedCharacters = true;
+        findCharactersOnStart = false;
+
+        if (memberInstances != null)
+        {
+            for (int i = 0; i < memberInstances.Count; i++)
+            {
+                GameObject memberObject = memberInstances[i];
+                if (memberObject == null)
+                {
+                    continue;
+                }
+
+                PlayerCharacterTemplate character = memberObject.GetComponent<PlayerCharacterTemplate>();
+                if (character == null)
+                {
+                    Debug.LogError($"[PlayerCharacterSwitcher] Party member prefab '{memberObject.name}' is missing {nameof(PlayerCharacterTemplate)}.", memberObject);
+                    continue;
+                }
+
+                characters.Add(character);
+            }
+        }
+
+        characters.Sort(CompareCharactersBySwitchOrder);
+        CacheRuntimeReferences();
+        SelectStartCharacter();
+        SyncAnchorTransform();
+        RefreshExploredRooms();
+    }
+
+    public void SetGeneratedLevelRuntime(GeneratedLevelRuntime runtime)
+    {
+        generatedLevelRuntime = runtime;
+        CacheRuntimeReferences();
+        RefreshExploredRooms();
+    }
+
+    public void TeleportParty(Vector3 spawnPosition)
+    {
+        for (int i = 0; i < characters.Count; i++)
+        {
+            PlayerCharacterTemplate character = characters[i];
+            if (character == null)
+            {
+                continue;
+            }
+
+            character.TeleportTo(spawnPosition + (Vector3)GetSpawnOffset(i));
+        }
+
+        ResetActiveTrail();
+        SyncAnchorTransform();
+        RefreshExploredRooms();
+    }
+
+    public int TeleportCompanionsToActiveCharacter(GeneratedRoomInfo requiredRoom = null)
+    {
+        PlayerCharacterTemplate activeCharacter = CurrentCharacter;
+        if (activeCharacter == null)
+        {
+            return 0;
+        }
+
+        Vector3 anchor = activeCharacter.transform.position;
+        int teleportedCount = 0;
+
+        for (int i = 0; i < characters.Count; i++)
+        {
+            PlayerCharacterTemplate character = characters[i];
+            if (character == null || character == activeCharacter || !character.IsAlive)
+            {
+                continue;
+            }
+
+            Vector3 desiredPosition = anchor + (Vector3)GetSpawnOffset(i);
+            if (requiredRoom != null
+                && generatedLevelRuntime != null
+                && generatedLevelRuntime.TryGetNearestFloorWorldPosition(requiredRoom, desiredPosition, out Vector3 safePosition))
+            {
+                desiredPosition = safePosition;
+            }
+
+            character.TeleportTo(desiredPosition);
+            teleportedCount++;
+        }
+
+        ResetActiveTrail();
+        SyncAnchorTransform();
+        RefreshExploredRooms();
+        return teleportedCount;
     }
 
     /// <summary>
@@ -176,7 +343,235 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         }
 
         currentCharacterIndex = newCharacterIndex;
+        hasShownPartyDeathMenu = false;
+        ResetActiveTrail();
         Debug.Log($"{name}: управление переключено на {CurrentCharacter.name}.");
+    }
+
+    private void TickCompanionFollow()
+    {
+        PlayerCharacterTemplate activeCharacter = CurrentCharacter;
+        if (activeCharacter == null)
+        {
+            return;
+        }
+
+        if (activeCharacter != lastActiveCharacter)
+        {
+            lastActiveCharacter = activeCharacter;
+            ResetActiveTrail();
+        }
+
+        UpdateActiveTrail(activeCharacter);
+
+        for (int step = 1; step < characters.Count; step++)
+        {
+            int characterIndex = GetWrappedCharacterIndex(currentCharacterIndex + step);
+            PlayerCharacterTemplate character = characters[characterIndex];
+            if (character == null || character == activeCharacter || !character.IsAlive)
+            {
+                continue;
+            }
+
+            Vector2 targetPosition = TryGetTrailPosition(step * companionTrailSpacing, out Vector2 trailPosition)
+                ? trailPosition
+                : (Vector2)activeCharacter.transform.position + GetFormationOffset(step);
+            Vector2 toTarget = targetPosition - (Vector2)character.transform.position;
+
+            if (toTarget.magnitude > companionTeleportDistance
+                && TryGetSafeTeleportPosition(targetPosition, out Vector3 safeTeleportPosition))
+            {
+                character.TeleportTo(safeTeleportPosition);
+                character.SetExternalAiMovementInput(Vector2.zero);
+                continue;
+            }
+
+            character.SetExternalAiMovementInput(toTarget.magnitude > 0.15f ? toTarget.normalized : Vector2.zero);
+        }
+    }
+
+    private bool TryGetSafeTeleportPosition(Vector3 desiredWorldPosition, out Vector3 safeWorldPosition)
+    {
+        safeWorldPosition = desiredWorldPosition;
+
+        if (generatedLevelRuntime == null)
+        {
+            return false;
+        }
+
+        if (!generatedLevelRuntime.TryGetRoomAtWorldPosition(desiredWorldPosition, out GeneratedRoomInfo roomInfo)
+            || roomInfo == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(roomInfo.NodeId) && !exploredRoomNodeIds.Contains(roomInfo.NodeId))
+        {
+            return false;
+        }
+
+        return generatedLevelRuntime.TryGetNearestFloorWorldPosition(roomInfo, desiredWorldPosition, out safeWorldPosition);
+    }
+
+    private void CacheRuntimeReferences()
+    {
+        if (playerRoomTracker == null)
+        {
+            AttachTracker(GetComponent<PlayerRoomTracker>());
+        }
+    }
+
+    private void AttachTracker(PlayerRoomTracker tracker)
+    {
+        if (playerRoomTracker != null)
+        {
+            playerRoomTracker.EnteredRoom -= HandleEnteredRoom;
+        }
+
+        playerRoomTracker = tracker;
+
+        if (playerRoomTracker != null)
+        {
+            playerRoomTracker.EnteredRoom += HandleEnteredRoom;
+        }
+    }
+
+    private void HandleEnteredRoom(GeneratedRoomInfo roomInfo)
+    {
+        RegisterExploredRoom(roomInfo);
+    }
+
+    private void RefreshExploredRooms()
+    {
+        if (playerRoomTracker == null)
+        {
+            return;
+        }
+
+        RegisterExploredRoom(playerRoomTracker.CurrentRoom);
+        RegisterExploredRoom(playerRoomTracker.LastKnownRoom);
+    }
+
+    private void RegisterExploredRoom(GeneratedRoomInfo roomInfo)
+    {
+        if (roomInfo == null || string.IsNullOrEmpty(roomInfo.NodeId))
+        {
+            return;
+        }
+
+        exploredRoomNodeIds.Add(roomInfo.NodeId);
+    }
+
+    private void SyncAnchorTransform()
+    {
+        PlayerCharacterTemplate activeCharacter = CurrentCharacter;
+        if (activeCharacter == null)
+        {
+            return;
+        }
+
+        transform.position = activeCharacter.transform.position;
+
+        if (playerRoomTracker != null)
+        {
+            playerRoomTracker.RefreshRoomNow();
+        }
+    }
+
+    private void ResetActiveTrail()
+    {
+        trailOwner = null;
+        activeTrailPoints.Clear();
+    }
+
+    private void UpdateActiveTrail(PlayerCharacterTemplate activeCharacter)
+    {
+        if (activeCharacter == null)
+        {
+            ResetActiveTrail();
+            return;
+        }
+
+        Vector2 activePosition = activeCharacter.transform.position;
+        if (trailOwner != activeCharacter)
+        {
+            trailOwner = activeCharacter;
+            activeTrailPoints.Clear();
+            activeTrailPoints.Add(activePosition);
+            return;
+        }
+
+        if (activeTrailPoints.Count == 0)
+        {
+            activeTrailPoints.Add(activePosition);
+            return;
+        }
+
+        float minPointSpacing = Mathf.Max(0.05f, trailPointSpacing);
+        if (Vector2.Distance(activeTrailPoints[0], activePosition) >= minPointSpacing)
+        {
+            activeTrailPoints.Insert(0, activePosition);
+        }
+        else
+        {
+            activeTrailPoints[0] = activePosition;
+        }
+
+        float requiredTrailLength = Mathf.Max(minPointSpacing, companionTrailSpacing) * Mathf.Max(2, characters.Count + 1);
+        float accumulatedDistance = 0f;
+
+        for (int i = 1; i < activeTrailPoints.Count; i++)
+        {
+            accumulatedDistance += Vector2.Distance(activeTrailPoints[i - 1], activeTrailPoints[i]);
+            if (accumulatedDistance <= requiredTrailLength)
+            {
+                continue;
+            }
+
+            activeTrailPoints.RemoveRange(i, activeTrailPoints.Count - i);
+            break;
+        }
+    }
+
+    private bool TryGetTrailPosition(float trailingDistance, out Vector2 trailPosition)
+    {
+        PlayerCharacterTemplate activeCharacter = CurrentCharacter;
+        if (activeCharacter == null)
+        {
+            trailPosition = Vector2.zero;
+            return false;
+        }
+
+        if (activeTrailPoints.Count == 0)
+        {
+            trailPosition = activeCharacter.transform.position;
+            return false;
+        }
+
+        float remainingDistance = Mathf.Max(0f, trailingDistance);
+
+        for (int i = 1; i < activeTrailPoints.Count; i++)
+        {
+            Vector2 from = activeTrailPoints[i - 1];
+            Vector2 to = activeTrailPoints[i];
+            float segmentLength = Vector2.Distance(from, to);
+
+            if (segmentLength <= 0.0001f)
+            {
+                continue;
+            }
+
+            if (remainingDistance <= segmentLength)
+            {
+                trailPosition = Vector2.Lerp(from, to, remainingDistance / segmentLength);
+                return true;
+            }
+
+            remainingDistance -= segmentLength;
+        }
+
+        trailPosition = activeTrailPoints[activeTrailPoints.Count - 1];
+        return false;
     }
 
     /// <summary>
@@ -286,6 +681,8 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         {
             return;
         }
+
+        hasShownPartyDeathMenu = false;
 
         if (revivedCharacter != CurrentCharacter)
         {
@@ -516,7 +913,19 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         if (showWarning)
         {
             Debug.LogWarning($"{name} нет дееспособных персонажей для управления.");
+            ShowPartyDeathMenuOnce();
         }
+    }
+
+    private void ShowPartyDeathMenuOnce()
+    {
+        if (hasShownPartyDeathMenu)
+        {
+            return;
+        }
+
+        hasShownPartyDeathMenu = true;
+        PlayerDeathRestartMenu.Show();
     }
 
     /// <summary>

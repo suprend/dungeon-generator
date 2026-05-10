@@ -431,8 +431,11 @@ public sealed class LevelEnemyController : MonoBehaviour
     {
         var partyController = ResolvePlayerPartyController();
         PartyMemberRuntime activeMember = null;
+        var characterSwitcher = ResolvePlayerCharacterSwitcher();
+        PlayerCharacterTemplate activeCharacter = null;
         var anchor = playerTarget != null ? playerTarget.position : transform.position;
         var partyControllerFound = partyController != null;
+        var characterSwitcherFound = characterSwitcher != null;
         var teleportedCount = 0;
         if (partyController != null)
         {
@@ -441,6 +444,14 @@ public sealed class LevelEnemyController : MonoBehaviour
                 anchor = activeMember.transform.position;
 
             teleportedCount += partyController.TeleportCompanionsToActiveMember(roomInfo);
+        }
+        else if (characterSwitcher != null)
+        {
+            activeCharacter = characterSwitcher.CurrentCharacter;
+            if (activeCharacter != null)
+                anchor = activeCharacter.transform.position;
+
+            teleportedCount += characterSwitcher.TeleportCompanionsToActiveCharacter(roomInfo);
         }
 
         var partyMembers = FindObjectsOfType<PartyMemberRuntime>(true);
@@ -460,7 +471,7 @@ public sealed class LevelEnemyController : MonoBehaviour
         }
 
         LogRoomLock(
-            $"Teleport attempt. partyController={partyControllerFound} active={(activeMember != null ? activeMember.name : "null")} anchor={anchor} foundMembers={partyMembers.Length} registeredMembers={PartyMemberRuntime.ActiveMembers.Count} aliveNonActive={aliveCount} teleported={teleportedCount}",
+            $"Teleport attempt. partyController={partyControllerFound} characterSwitcher={characterSwitcherFound} active={(activeMember != null ? activeMember.name : activeCharacter != null ? activeCharacter.name : "null")} anchor={anchor} foundMembers={partyMembers.Length} registeredMembers={PartyMemberRuntime.ActiveMembers.Count} aliveNonActive={aliveCount} teleported={teleportedCount}",
             repeated: false);
     }
 
@@ -476,6 +487,18 @@ public sealed class LevelEnemyController : MonoBehaviour
         return FindObjectOfType<PlayerPartyController>();
     }
 
+    private PlayerCharacterSwitcher ResolvePlayerCharacterSwitcher()
+    {
+        if (generatedLevelRuntime != null &&
+            generatedLevelRuntime.SpawnedPlayerInstance != null &&
+            generatedLevelRuntime.SpawnedPlayerInstance.TryGetComponent<PlayerCharacterSwitcher>(out var spawnedCharacterSwitcher))
+        {
+            return spawnedCharacterSwitcher;
+        }
+
+        return FindObjectOfType<PlayerCharacterSwitcher>();
+    }
+
     private void TryRefreshCurrentPlayerRoom()
     {
         if (generatedLevelRuntime == null)
@@ -485,6 +508,12 @@ public sealed class LevelEnemyController : MonoBehaviour
         var partyController = ResolvePlayerPartyController();
         if (partyController != null && partyController.ActiveMember != null)
             roomPosition = partyController.ActiveMember.transform.position;
+        else
+        {
+            var characterSwitcher = ResolvePlayerCharacterSwitcher();
+            if (characterSwitcher != null && characterSwitcher.CurrentCharacter != null)
+                roomPosition = characterSwitcher.CurrentCharacter.transform.position;
+        }
 
         if (!generatedLevelRuntime.TryGetRoomAtWorldPosition(roomPosition, out var roomInfo) || roomInfo == null)
         {

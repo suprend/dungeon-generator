@@ -980,10 +980,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   graphMapBuilder: {fileID: 809282457}
   spawnPlayerAfterBuild: 1
-  playerPrefab: {fileID: 953530847934859495, guid: a1fd6bce3acb14703bd3680ee431ce42, type: 3}
+  playerPrefab: {fileID: 0}
   partyMemberPrefabs:
-  - {fileID: 953530847934859495, guid: 405ce75b4d644bf29bece99f2dc8a3b7, type: 3}
-  - {fileID: 953530847934859495, guid: bf2610b8d34344ddba404e4327be3653, type: 3}
+  - {fileID: 100000, guid: 507c0fc96ff9422abb20db3f2d137b82, type: 3}
+  - {fileID: 100000, guid: db0e99a8494744149a16d91858aa8a2f, type: 3}
+  - {fileID: 100000, guid: f0de2bc676f142ad8ca45b66c5d0df20, type: 3}
+  - {fileID: 100000, guid: bcef52d1f9f54adbaeb06b0b5b960b4f, type: 3}
   allowCompanionTeleportToExploredRooms: 0
   cinemachineCamera: {fileID: 43209020}
 --- !u!114 &809282459

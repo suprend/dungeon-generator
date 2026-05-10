@@ -21,22 +21,38 @@ public sealed class HealthPickup : MonoBehaviour, IInteractable
     public bool CanInteract(GameObject interactor)
     {
         var health = FindHealth(interactor);
-        return health != null && !health.IsDead;
+        if (health != null)
+            return !health.IsDead;
+
+        var character = FindPlayerCharacter(interactor);
+        return character != null && character.IsAlive;
     }
 
     public void Interact(GameObject interactor)
     {
         var health = FindHealth(interactor);
-        if (health == null || health.IsDead)
+        if (health != null && !health.IsDead)
+        {
+            var healthBefore = health.CurrentHealth;
+            if (restoreFullHealth)
+                health.RestoreFull();
+            else
+                health.Heal(healAmount);
+
+            if (consumeOnUse && health.CurrentHealth > healthBefore)
+                Destroy(gameObject);
+
+            return;
+        }
+
+        var character = FindPlayerCharacter(interactor);
+        if (character == null || !character.IsAlive)
             return;
 
-        var healthBefore = health.CurrentHealth;
-        if (restoreFullHealth)
-            health.RestoreFull();
-        else
-            health.Heal(healAmount);
+        var characterHealthBefore = character.CurrentHealth;
+        character.Heal(restoreFullHealth ? character.MaxHealth : healAmount);
 
-        if (consumeOnUse && health.CurrentHealth > healthBefore)
+        if (consumeOnUse && character.CurrentHealth > characterHealthBefore)
             Destroy(gameObject);
     }
 
@@ -53,5 +69,20 @@ public sealed class HealthPickup : MonoBehaviour, IInteractable
             return health;
 
         return interactor.GetComponentInChildren<Health>();
+    }
+
+    private static PlayerCharacterTemplate FindPlayerCharacter(GameObject interactor)
+    {
+        if (interactor == null)
+            return null;
+
+        if (interactor.TryGetComponent<PlayerCharacterTemplate>(out var character))
+            return character;
+
+        character = interactor.GetComponentInParent<PlayerCharacterTemplate>();
+        if (character != null)
+            return character;
+
+        return interactor.GetComponentInChildren<PlayerCharacterTemplate>();
     }
 }

@@ -167,7 +167,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetScene: {fileID: 102900000, guid: 2cda990e2423bbf4892e6590ba056729, type: 3}
-  targetSceneName: PartyTestScene
+  targetSceneName: SampleScene
   buttonText: "\u0421\u0442\u0430\u0440\u0442"
   buttonSize: {x: 240, y: 80}
   controlsDescription: "\u0423\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\nWASD

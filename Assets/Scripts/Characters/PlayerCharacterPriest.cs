@@ -112,7 +112,7 @@ public class PlayerCharacterPriest : PlayerCharacterTemplate
             return;
         }
 
-        EnemyTemplate target = FindClosestAliveEnemy(aiAttackSearchRadius, aiAttackLayers);
+        Component target = FindClosestAliveDamageableComponent(aiAttackSearchRadius, aiAttackLayers);
 
         if (target != null)
         {

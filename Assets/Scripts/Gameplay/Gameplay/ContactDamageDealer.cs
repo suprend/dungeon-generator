@@ -52,14 +52,34 @@ public sealed class ContactDamageDealer : MonoBehaviour
             return;
 
         var health = other.GetComponentInParent<Health>();
-        if (health == null || health == GetComponentInParent<Health>())
+        if (health == GetComponentInParent<Health>())
+            return;
+        if (health != null && IsFriendlyHealthTarget(health))
             return;
 
-        var targetId = health.GetInstanceID();
+        var legacyCharacter = health == null ? other.GetComponentInParent<PlayerCharacterTemplate>() : null;
+        if (health == null && (legacyCharacter == null || !legacyCharacter.IsAlive))
+            return;
+
+        var targetId = health != null ? health.GetInstanceID() : legacyCharacter.GetInstanceID();
         if (nextHitTimeByTarget.TryGetValue(targetId, out var nextAllowedTime) && Time.time < nextAllowedTime)
             return;
 
         nextHitTimeByTarget[targetId] = Time.time + Mathf.Max(0.01f, hitCooldownSeconds);
-        health.ApplyDamage(Mathf.Max(0, damage));
+        if (health != null)
+            health.ApplyDamage(Mathf.Max(0, damage));
+        else
+            legacyCharacter.TakeDamage(Mathf.Max(0, damage));
+    }
+
+    private bool IsFriendlyHealthTarget(Health targetHealth)
+    {
+        var ownerHealth = GetComponentInParent<Health>();
+        if (ownerHealth == null || targetHealth == null)
+            return false;
+
+        var ownerIsEnemy = ownerHealth.GetComponentInParent<EnemyAuthoring>() != null;
+        var targetIsEnemy = targetHealth.GetComponentInParent<EnemyAuthoring>() != null;
+        return ownerIsEnemy && targetIsEnemy;
     }
 }

@@ -7,7 +7,7 @@ namespace DanverPlayground.Roguelike.Characters
 {
     [RequireComponent(typeof(Rigidbody2D))]
     // Главный runtime-компонент персонажа: движение, стрельба, способности, здоровье и переключение Player/AI.
-    public class GameCharacter : MonoBehaviour, IDamageable
+    public class GameCharacter : MonoBehaviour
     {
         [Header("Config")]
         [SerializeField] private CharacterDefinition definition;

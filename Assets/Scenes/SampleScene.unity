@@ -730,7 +730,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: -2
   m_ChunkSize: {x: 32, y: 32, z: 32}
   m_ChunkCullingBounds: {x: 0, y: 0, z: 0}
   m_MaxChunkCount: 16
@@ -980,6 +980,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   graphMapBuilder: {fileID: 809282457}
   spawnPlayerAfterBuild: 1
+  preserveSpawnedPlayerOnRebuild: 0
   playerPrefab: {fileID: 0}
   partyMemberPrefabs:
   - {fileID: 100000, guid: 507c0fc96ff9422abb20db3f2d137b82, type: 3}
@@ -1069,7 +1070,7 @@ MonoBehaviour:
   m_OverrideTileSize: 0
   m_TileSize: 256
   m_OverrideVoxelSize: 0
-  m_VoxelSize: 0.11666667
+  m_VoxelSize: 0.06666667
   m_BuildHeightMesh: 0
   m_MinRegionArea: 0
   m_HideEditorLogs: 0
@@ -1114,8 +1115,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: be45598f97dd1482a89a433c70acadb1, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   graphMapBuilder: {fileID: 809282457}
   generatedLevelRuntime: {fileID: 809282458}
   levelEnemyController: {fileID: 809282459}
@@ -1354,7 +1355,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: -5
   m_ChunkSize: {x: 32, y: 32, z: 32}
   m_ChunkCullingBounds: {x: 0, y: 0, z: 0}
   m_MaxChunkCount: 16

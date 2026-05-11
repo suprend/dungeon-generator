@@ -18,3 +18,7 @@
 # OS / editor noise
 .DS_Store
 .vscode/
+
+# Local agent / AI notes
+AGENTS.md
+docs/ai/

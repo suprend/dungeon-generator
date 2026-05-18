@@ -43,45 +43,29 @@ MonoBehaviour:
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
     position: {x: 485.08676, y: -171.05913}
-  - id: aab04a7b62ea41a385e9b98b4df62246
-    label: End
-    roomType: {fileID: 11400000, guid: 34bcc1fada6ac407889ad9f925780410, type: 2}
+  - id: 8a83f1ab5d7f4544a6f28ca42647d64e
+    label: boss
+    roomType: {fileID: 11400000, guid: 7161bdcbeb6e64dd39a248cd37d5db91, type: 2}
     notes: 
-    position: {x: 647.5001, y: -181.00002}
-  - id: def3dd3190da458d97951711e0543c0a
-    label: BaseRoom
-    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
-    notes: 
-    position: {x: 288.79724, y: -81.905525}
-  - id: b028e5960d6c4fac941d3a1dca0d8a68
-    label: shop
-    roomType: {fileID: 11400000, guid: 8f1b74222788e44968d734ee41e9d2c6, type: 2}
-    notes: 
-    position: {x: 191.50002, y: -12.499992}
+    position: {x: 659.2263, y: -220.37003}
   edges:
+  - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
+    toNodeId: 17294c98009941e78dab259299814f59
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 17294c98009941e78dab259299814f59
+    toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
+    toNodeId: 8a83f1ab5d7f4544a6f28ca42647d64e
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
+    toNodeId: 1d21837d4c45421ba028548180c26977
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
     toNodeId: a4eae09f5d474e819ff8ba25c6c49887
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 1d21837d4c45421ba028548180c26977
-    toNodeId: 43d5fef0e8f44a1799d90741f497f800
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 17294c98009941e78dab259299814f59
-    toNodeId: 43d5fef0e8f44a1799d90741f497f800
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 57d825e9a3ab483d9425e9a04462d54f
-    toNodeId: 1d21837d4c45421ba028548180c26977
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 17294c98009941e78dab259299814f59
-    toNodeId: def3dd3190da458d97951711e0543c0a
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: 17294c98009941e78dab259299814f59
-    toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: aab04a7b62ea41a385e9b98b4df62246
-    toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
-    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: b028e5960d6c4fac941d3a1dca0d8a68
-    toNodeId: def3dd3190da458d97951711e0543c0a
+  - fromNodeId: a4eae09f5d474e819ff8ba25c6c49887
+    toNodeId: 57d825e9a3ab483d9425e9a04462d54f
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
   defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

@@ -1,5 +1,7 @@
 //DP
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -8,6 +10,18 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody2D))]
 public class EnemyTemplate : MonoBehaviour, IDamageable
 {
+    private enum AiMovementMode
+    {
+        Idle,
+        ApproachTarget,
+        RetreatFromTarget
+    }
+
+    private const float IncapacitatedSpriteRotationZ = 90f;
+    private const float TransformKnockbackFallbackDistanceMultiplier = 0.1f;
+    private const float MinKnockbackDirectionSqrMagnitude = 0.0001f;
+    private const float MinAiMovementSqrMagnitude = 0.0001f;
+
     [Header("Статы противника")]
     [SerializeField, Min(1f)] private float maxHealth = 50f;
     [SerializeField, Min(0f)] private float currentHealth = 50f;
@@ -33,8 +47,28 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     [SerializeField, Min(0f)] private float stunStatusScale = 1f;
     [SerializeField] private int stunStatusSortingOrderOffset = 5;
 
+    [Header("Смерть")]
+    [SerializeField, Range(0f, 1f)] private float incapacitatedBrightnessMultiplier = 0.45f;
+    [Tooltip("Multiplier applied to knockback from a lethal hit.")]
+    [SerializeField, Min(1f)] private float deathKnockbackForceMultiplier = 2f;
+
+    [Header("AI Movement")]
+    [SerializeField, Min(0f)] private float aiApproachZone = 5f;
+    [SerializeField, Min(0f)] private float aiRetreatZone = 2f;
+    [SerializeField, Min(0f)] private float aiMovementZoneHysteresis = 0.35f;
+    [SerializeField, Min(0f)] private float aiMovementSmoothing = 10f;
+    [SerializeField] private Color aiApproachZoneGizmoColor = new Color(0.2f, 0.7f, 1f, 0.9f);
+    [SerializeField] private Color aiRetreatZoneGizmoColor = new Color(1f, 0.35f, 0.15f, 0.9f);
+
+    [Header("AI Attack")]
+    [SerializeField, Min(0f)] private float aiAttackZone = 4f;
+    [SerializeField] private Color aiAttackZoneGizmoColor = Color.green;
+
     private Rigidbody2D enemyRigidbody;
     private SpriteRenderer[] spriteRenderers;
+    private Color[] defaultSpriteColors;
+    private Transform[] spriteTransforms;
+    private Quaternion[] defaultSpriteLocalRotations;
     private SpriteRenderer stunStatusRenderer;
     private SpriteRenderer defenceDownStatusRenderer;
     private SpriteRenderer speedDownStatusRenderer;
@@ -42,8 +76,10 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     private Coroutine externalMovementCoroutine;
     private Coroutine stunCoroutine;
     private Coroutine damageResistanceReductionCoroutine;
+    private Vector2 smoothedAiMovementInput;
     private float currentSpeed;
     private float activeTemporaryDamageResistanceReductionPercent;
+    private AiMovementMode aiMovementMode;
     private bool isStunned;
     private bool isSpeedSlowed;
 
@@ -56,6 +92,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     public bool IsExternalMovementActive { get; private set; }
     public bool IsStunned => isStunned;
     public bool IsAlive => currentHealth > 0f;
+    public event Action<EnemyTemplate> Died;
 
     private void Awake()
     {
@@ -72,6 +109,11 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         UpdateStunStatusVisual();
         UpdateDefenceDownStatusVisual();
         UpdateSpeedDownStatusVisual();
+
+        if (!IsAlive)
+        {
+            BecomeIncapacitated();
+        }
     }
 
     private void OnValidate()
@@ -101,26 +143,202 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         }
     }
 
+    protected void MoveWithAiDistancesToTarget(PlayerCharacterTemplate targetCharacter)
+    {
+        if (!CanUseAiDistanceMovement(targetCharacter))
+        {
+            ResetAiDistanceMovement();
+            return;
+        }
+
+        Vector2 movementInput = GetAiDistanceMovementInput(targetCharacter.transform.position);
+        SetAiDistanceMovementInput(movementInput);
+
+        if (smoothedAiMovementInput.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            return;
+        }
+
+        Vector2 nextPosition = enemyRigidbody.position
+            + smoothedAiMovementInput * Speed * Time.fixedDeltaTime;
+        enemyRigidbody.MovePosition(nextPosition);
+    }
+
+    protected void ResetAiDistanceMovement()
+    {
+        aiMovementMode = AiMovementMode.Idle;
+        smoothedAiMovementInput = Vector2.zero;
+    }
+
+    protected void DrawAiMovementGizmos()
+    {
+        Gizmos.color = aiApproachZoneGizmoColor;
+        Gizmos.DrawWireSphere(transform.position, aiApproachZone);
+
+        Gizmos.color = aiRetreatZoneGizmoColor;
+        Gizmos.DrawWireSphere(transform.position, aiRetreatZone);
+    }
+
+    protected void DrawAiAttackGizmos()
+    {
+        Gizmos.color = aiAttackZoneGizmoColor;
+        Gizmos.DrawWireSphere(transform.position, aiAttackZone);
+    }
+
+    protected PlayerCharacterTemplate FindClosestAlivePlayerCharacter()
+    {
+        return FindClosestAlivePlayerCharacter(float.PositiveInfinity);
+    }
+
+    protected PlayerCharacterTemplate FindClosestAlivePlayerCharacterInAiAttackZone()
+    {
+        return FindClosestAlivePlayerCharacter(aiAttackZone);
+    }
+
+    private PlayerCharacterTemplate FindClosestAlivePlayerCharacter(float maxDistance)
+    {
+        PlayerCharacterTemplate[] characters =
+            FindObjectsByType<PlayerCharacterTemplate>(FindObjectsSortMode.None);
+        PlayerCharacterTemplate closestCharacter = null;
+        float closestSqrDistance = float.PositiveInfinity;
+        float maxSqrDistance = Mathf.Max(0f, maxDistance) * Mathf.Max(0f, maxDistance);
+        Vector2 currentPosition = transform.position;
+
+        for (int i = 0; i < characters.Length; i++)
+        {
+            PlayerCharacterTemplate character = characters[i];
+
+            if (character == null || !character.IsAlive)
+            {
+                continue;
+            }
+
+            float sqrDistance = ((Vector2)character.transform.position - currentPosition).sqrMagnitude;
+
+            if (sqrDistance > maxSqrDistance || sqrDistance >= closestSqrDistance)
+            {
+                continue;
+            }
+
+            closestSqrDistance = sqrDistance;
+            closestCharacter = character;
+        }
+
+        return closestCharacter;
+    }
+
+    private bool CanUseAiDistanceMovement(PlayerCharacterTemplate targetCharacter)
+    {
+        return targetCharacter != null
+            && targetCharacter.IsAlive
+            && IsAlive
+            && !IsExternalMovementActive
+            && !IsStunned
+            && TryCacheRigidbody();
+    }
+
+    private Vector2 GetAiDistanceMovementInput(Vector2 targetPosition)
+    {
+        Vector2 directionToTarget = targetPosition - enemyRigidbody.position;
+        float distanceToTarget = directionToTarget.magnitude;
+        float retreatZone = Mathf.Max(0f, aiRetreatZone);
+        float approachZone = Mathf.Max(retreatZone, aiApproachZone);
+        float hysteresis = Mathf.Max(0f, aiMovementZoneHysteresis);
+        float retreatStopDistance = Mathf.Min(approachZone, retreatZone + hysteresis);
+
+        if (aiMovementMode == AiMovementMode.RetreatFromTarget
+            && distanceToTarget >= retreatStopDistance)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachTarget
+            && distanceToTarget <= approachZone)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+            smoothedAiMovementInput = Vector2.zero;
+        }
+
+        if (aiMovementMode == AiMovementMode.Idle)
+        {
+            if (distanceToTarget < retreatZone)
+            {
+                aiMovementMode = AiMovementMode.RetreatFromTarget;
+            }
+            else if (distanceToTarget > approachZone)
+            {
+                aiMovementMode = AiMovementMode.ApproachTarget;
+            }
+        }
+
+        if (directionToTarget.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            return Vector2.zero;
+        }
+
+        if (aiMovementMode == AiMovementMode.RetreatFromTarget)
+        {
+            return -directionToTarget.normalized;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachTarget)
+        {
+            return directionToTarget.normalized;
+        }
+
+        return Vector2.zero;
+    }
+
+    private void SetAiDistanceMovementInput(Vector2 newMovementInput)
+    {
+        Vector2 targetMovementInput = newMovementInput.sqrMagnitude > MinAiMovementSqrMagnitude
+            ? Vector2.ClampMagnitude(newMovementInput, 1f)
+            : Vector2.zero;
+        float smoothing = Mathf.Max(0f, aiMovementSmoothing);
+
+        smoothedAiMovementInput = smoothing > 0f
+            ? Vector2.MoveTowards(
+                smoothedAiMovementInput,
+                targetMovementInput,
+                smoothing * Time.fixedDeltaTime)
+            : targetMovementInput;
+
+        if (smoothedAiMovementInput.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            smoothedAiMovementInput = Vector2.zero;
+            return;
+        }
+
+        smoothedAiMovementInput = Vector2.ClampMagnitude(smoothedAiMovementInput, 1f);
+    }
+
     /// <summary>
     /// Получение урона
     /// </summary>
     public void TakeDamage(float damageAmount)
+    {
+        TakeDamage(damageAmount, Vector2.zero, 0f);
+    }
+
+    public void TakeDamage(float damageAmount, Vector2 knockbackDirection, float knockbackForce)
     {
         if (damageAmount <= 0f || !IsAlive)
         {
             return;
         }
 
+        bool wasAlive = IsAlive;
+        ApplyKnockback(knockbackDirection, knockbackForce, 1f);
+
         float finalDamageAmount = GetDamageAfterResistance(damageAmount);
         currentHealth = Mathf.Max(currentHealth - finalDamageAmount, 0f);
 
         if (!IsAlive)
         {
-            isStunned = false;
-            isSpeedSlowed = false;
-            UpdateStunStatusVisual();
-            UpdateDefenceDownStatusVisual();
-            UpdateSpeedDownStatusVisual();
+            BecomeIncapacitated();
+            ApplyDeathKnockback(knockbackDirection, knockbackForce);
+            if (wasAlive)
+                Died?.Invoke(this);
         }
 
         Debug.Log($"{name}: получил {finalDamageAmount:0.0} урона. Здоровье: {currentHealth}/{maxHealth}.");
@@ -177,6 +395,54 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         return damageAmount * damageMultiplier;
     }
 
+    public void ApplyKnockback(Vector2 knockbackDirection, float knockbackForce)
+    {
+        float forceMultiplier = IsAlive ? 1f : deathKnockbackForceMultiplier;
+        ApplyKnockback(knockbackDirection, knockbackForce, forceMultiplier);
+    }
+
+    private void ApplyDeathKnockback(Vector2 knockbackDirection, float knockbackForce)
+    {
+        ApplyKnockback(knockbackDirection, knockbackForce, deathKnockbackForceMultiplier);
+    }
+
+    private void ApplyKnockback(
+        Vector2 knockbackDirection,
+        float knockbackForce,
+        float forceMultiplier)
+    {
+        if (knockbackForce <= 0f || knockbackDirection.sqrMagnitude <= MinKnockbackDirectionSqrMagnitude)
+        {
+            return;
+        }
+
+        Vector2 normalizedDirection = knockbackDirection.normalized;
+        float finalKnockbackForce = knockbackForce * Mathf.Max(1f, forceMultiplier);
+
+        if (!TryCacheRigidbody())
+        {
+            transform.position += (Vector3)(normalizedDirection
+                * finalKnockbackForce
+                * TransformKnockbackFallbackDistanceMultiplier);
+            return;
+        }
+
+        if (enemyRigidbody.bodyType == RigidbodyType2D.Static)
+        {
+            return;
+        }
+
+        if (enemyRigidbody.simulated)
+        {
+            enemyRigidbody.AddForce(normalizedDirection * finalKnockbackForce, ForceMode2D.Impulse);
+            return;
+        }
+
+        transform.position += (Vector3)(normalizedDirection
+            * finalKnockbackForce
+            * TransformKnockbackFallbackDistanceMultiplier);
+    }
+
     /// <summary>
     /// Сохраняет спрайты тела противника чтобы статусы могли правильно вставать поверх них
     /// </summary>
@@ -194,6 +460,9 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         }
 
         spriteRenderers = new SpriteRenderer[bodyRenderersCount];
+        defaultSpriteColors = new Color[bodyRenderersCount];
+        List<Transform> bodySpriteTransforms = new List<Transform>();
+        List<Quaternion> bodySpriteRotations = new List<Quaternion>();
         int bodyRendererIndex = 0;
 
         for (int i = 0; i < allSpriteRenderers.Length; i++)
@@ -204,8 +473,21 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
             }
 
             spriteRenderers[bodyRendererIndex] = allSpriteRenderers[i];
+            defaultSpriteColors[bodyRendererIndex] = allSpriteRenderers[i].color;
+
+            Transform spriteTransform = allSpriteRenderers[i].transform;
+
+            if (!bodySpriteTransforms.Contains(spriteTransform))
+            {
+                bodySpriteTransforms.Add(spriteTransform);
+                bodySpriteRotations.Add(spriteTransform.localRotation);
+            }
+
             bodyRendererIndex++;
         }
+
+        spriteTransforms = bodySpriteTransforms.ToArray();
+        defaultSpriteLocalRotations = bodySpriteRotations.ToArray();
     }
 
     /// <summary>
@@ -217,6 +499,118 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
             && !ReferenceEquals(spriteRenderer, stunStatusRenderer)
             && !ReferenceEquals(spriteRenderer, defenceDownStatusRenderer)
             && !ReferenceEquals(spriteRenderer, speedDownStatusRenderer);
+    }
+
+    /// <summary>
+    /// Переводит противника в недееспособное состояние
+    /// </summary>
+    private void BecomeIncapacitated()
+    {
+        StopCoroutineIfRunning(ref speedSlowCoroutine);
+        StopCoroutineIfRunning(ref stunCoroutine);
+
+        if (damageResistanceReductionCoroutine != null)
+        {
+            StopCoroutine(damageResistanceReductionCoroutine);
+            damageResistanceReductionCoroutine = null;
+            RestoreTemporaryDamageResistanceReduction();
+        }
+
+        if (externalMovementCoroutine != null)
+        {
+            StopCoroutine(externalMovementCoroutine);
+            FinishExternalMovement();
+        }
+
+        ResetAiDistanceMovement();
+        currentSpeed = 0f;
+        isStunned = false;
+        isSpeedSlowed = false;
+
+        if (enemyRigidbody != null)
+        {
+            enemyRigidbody.velocity = Vector2.zero;
+        }
+
+        RestoreEnemyBodyColors();
+        SetIncapacitatedSpriteRotation(true);
+        UpdateStunStatusVisual();
+        UpdateDefenceDownStatusVisual();
+        UpdateSpeedDownStatusVisual();
+    }
+
+    private void StopCoroutineIfRunning(ref Coroutine coroutine)
+    {
+        if (coroutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(coroutine);
+        coroutine = null;
+    }
+
+    private void RestoreEnemyBodyColors()
+    {
+        if (spriteRenderers == null || defaultSpriteColors == null)
+        {
+            CacheSpriteRenderers();
+        }
+
+        if (spriteRenderers == null || defaultSpriteColors == null)
+        {
+            return;
+        }
+
+        int renderersCount = Mathf.Min(spriteRenderers.Length, defaultSpriteColors.Length);
+
+        for (int i = 0; i < renderersCount; i++)
+        {
+            if (spriteRenderers[i] == null)
+            {
+                continue;
+            }
+
+            spriteRenderers[i].color = IsAlive
+                ? defaultSpriteColors[i]
+                : GetIncapacitatedColor(defaultSpriteColors[i]);
+        }
+    }
+
+    private Color GetIncapacitatedColor(Color sourceColor)
+    {
+        return new Color(
+            sourceColor.r * incapacitatedBrightnessMultiplier,
+            sourceColor.g * incapacitatedBrightnessMultiplier,
+            sourceColor.b * incapacitatedBrightnessMultiplier,
+            sourceColor.a);
+    }
+
+    private void SetIncapacitatedSpriteRotation(bool shouldLieDown)
+    {
+        if (spriteTransforms == null || defaultSpriteLocalRotations == null)
+        {
+            CacheSpriteRenderers();
+        }
+
+        if (spriteTransforms == null || defaultSpriteLocalRotations == null)
+        {
+            return;
+        }
+
+        int transformsCount = Mathf.Min(spriteTransforms.Length, defaultSpriteLocalRotations.Length);
+
+        for (int i = 0; i < transformsCount; i++)
+        {
+            if (spriteTransforms[i] == null)
+            {
+                continue;
+            }
+
+            spriteTransforms[i].localRotation = shouldLieDown
+                ? defaultSpriteLocalRotations[i] * Quaternion.Euler(0f, 0f, IncapacitatedSpriteRotationZ)
+                : defaultSpriteLocalRotations[i];
+        }
     }
 
     /// <summary>
@@ -737,6 +1131,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     {
         IsExternalMovementActive = false;
         externalMovementCoroutine = null;
+        ResetAiDistanceMovement();
     }
 
     /// <summary>

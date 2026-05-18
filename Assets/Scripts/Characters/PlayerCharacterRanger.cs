@@ -362,6 +362,8 @@ public class PlayerCharacterRanger : PlayerCharacterTemplate
     {
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(transform.position, aiAttackSearchRadius);
+
+        DrawAiMovementGizmos();
     }
 
     /// <summary>
@@ -397,7 +399,6 @@ public class PlayerCharacterRanger : PlayerCharacterTemplate
     {
         isDashing = true;
         SetIncomingAttacksIgnored(true);
-        ApplyDamageResistance(100f, thirdAbilityDashDuration + Time.fixedDeltaTime);
         SaveCharacterColliderTriggerStates();
         SetCharacterCollidersTriggerState(true);
 

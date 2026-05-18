@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// Переключает управление игрока между доступными персонажами.
@@ -16,7 +17,12 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     [Header("Следование партии")]
     [SerializeField, Min(0f)] private float companionTrailSpacing = 1.1f;
     [SerializeField, Min(0.01f)] private float trailPointSpacing = 0.25f;
-    [SerializeField, Min(0f)] private float companionTeleportDistance = 8f;
+    [SerializeField, Min(0f)] private float companionFollowStopDistance = 0.15f;
+    [SerializeField, Min(0.05f)] private float companionTeleportSeparation = 0.8f;
+    [SerializeField, Min(0.5f)] private float companionTeleportSearchRadius = 3f;
+    [SerializeField, Min(0.05f)] private float companionTeleportNavMeshSampleRadius = 0.45f;
+    [SerializeField, Min(0.01f)] private float companionTeleportBlockedCheckRadius = 0.18f;
+    [SerializeField] private LayerMask companionTeleportBlockedLayers = ~0;
 
     [Header("Воскрешение")]
     [SerializeField, Min(0f)] private float resurrectionRange = 1.5f;
@@ -51,6 +57,7 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     private float resurrectionProgress;
     private readonly HashSet<string> exploredRoomNodeIds = new HashSet<string>();
     private readonly List<Vector2> activeTrailPoints = new List<Vector2>();
+    private readonly Collider2D[] companionTeleportOverlapResults = new Collider2D[16];
     private GeneratedLevelRuntime generatedLevelRuntime;
     private PlayerRoomTracker playerRoomTracker;
     private PlayerCharacterTemplate trailOwner;
@@ -224,13 +231,20 @@ public class PlayerCharacterSwitcher : MonoBehaviour
 
     public int TeleportCompanionsToActiveCharacter(GeneratedRoomInfo requiredRoom = null)
     {
+        if (CurrentCharacter == null || !CurrentCharacter.IsAlive)
+        {
+            EnsureCurrentCharacterIsAvailable();
+        }
+
         PlayerCharacterTemplate activeCharacter = CurrentCharacter;
-        if (activeCharacter == null)
+        if (activeCharacter == null || !activeCharacter.IsAlive)
         {
             return 0;
         }
 
+        CacheRuntimeReferences();
         Vector3 anchor = activeCharacter.transform.position;
+        List<Vector3> occupiedPositions = new List<Vector3> { anchor };
         int teleportedCount = 0;
 
         for (int i = 0; i < characters.Count; i++)
@@ -241,15 +255,13 @@ public class PlayerCharacterSwitcher : MonoBehaviour
                 continue;
             }
 
-            Vector3 desiredPosition = anchor + (Vector3)GetSpawnOffset(i);
-            if (requiredRoom != null
-                && generatedLevelRuntime != null
-                && generatedLevelRuntime.TryGetNearestFloorWorldPosition(requiredRoom, desiredPosition, out Vector3 safePosition))
+            if (!TryGetCompanionTeleportPosition(anchor, requiredRoom, occupiedPositions, i, out Vector3 teleportPosition))
             {
-                desiredPosition = safePosition;
+                continue;
             }
 
-            character.TeleportTo(desiredPosition);
+            character.TeleportTo(teleportPosition);
+            occupiedPositions.Add(teleportPosition);
             teleportedCount++;
         }
 
@@ -257,6 +269,171 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         SyncAnchorTransform();
         RefreshExploredRooms();
         return teleportedCount;
+    }
+
+    private bool TryGetCompanionTeleportPosition(
+        Vector3 anchor,
+        GeneratedRoomInfo requiredRoom,
+        List<Vector3> occupiedPositions,
+        int characterIndex,
+        out Vector3 teleportPosition)
+    {
+        Vector2 preferredOffset = GetSpawnOffset(characterIndex);
+        if (preferredOffset.sqrMagnitude <= 0.0001f)
+        {
+            preferredOffset = GetFormationOffset(characterIndex);
+        }
+
+        if (TryAcceptTeleportCandidate(anchor + (Vector3)preferredOffset, requiredRoom, occupiedPositions, out teleportPosition))
+        {
+            return true;
+        }
+
+        float maxRadius = Mathf.Max(0.5f, companionTeleportSearchRadius);
+        float minRadius = Mathf.Max(0.35f, companionTeleportSeparation);
+        float radiusStep = Mathf.Max(0.25f, companionTeleportSeparation * 0.5f);
+        float angleOffset = characterIndex * 47f;
+
+        for (float radius = minRadius; radius <= maxRadius; radius += radiusStep)
+        {
+            int samples = Mathf.Max(8, Mathf.CeilToInt(radius * 8f));
+            for (int sample = 0; sample < samples; sample++)
+            {
+                float angle = (angleOffset + sample * (360f / samples)) * Mathf.Deg2Rad;
+                Vector3 candidate = anchor + new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * radius;
+                if (TryAcceptTeleportCandidate(candidate, requiredRoom, occupiedPositions, out teleportPosition))
+                {
+                    return true;
+                }
+            }
+        }
+
+        teleportPosition = anchor;
+        return false;
+    }
+
+    private bool TryAcceptTeleportCandidate(
+        Vector3 candidate,
+        GeneratedRoomInfo requiredRoom,
+        List<Vector3> occupiedPositions,
+        out Vector3 teleportPosition)
+    {
+        teleportPosition = candidate;
+
+        if (!NavMesh.SamplePosition(
+                candidate,
+                out NavMeshHit hit,
+                Mathf.Max(0.05f, companionTeleportNavMeshSampleRadius),
+                NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        teleportPosition = hit.position;
+        teleportPosition.z = candidate.z;
+
+        if (!TryProjectTeleportPositionToRoomFloor(teleportPosition, requiredRoom, out teleportPosition))
+        {
+            return false;
+        }
+
+        if (!IsTeleportPositionSeparated(teleportPosition, occupiedPositions))
+        {
+            return false;
+        }
+
+        return !IsTeleportPositionBlockedByCollider(teleportPosition);
+    }
+
+    private bool TryProjectTeleportPositionToRoomFloor(
+        Vector3 navMeshPosition,
+        GeneratedRoomInfo requiredRoom,
+        out Vector3 floorPosition)
+    {
+        floorPosition = navMeshPosition;
+
+        if (generatedLevelRuntime == null)
+        {
+            return true;
+        }
+
+        if (!generatedLevelRuntime.TryGetRoomAtWorldPosition(navMeshPosition, out GeneratedRoomInfo roomInfo)
+            || roomInfo == null)
+        {
+            return false;
+        }
+
+        if (requiredRoom != null
+            && !string.Equals(roomInfo.NodeId, requiredRoom.NodeId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        GeneratedRoomInfo floorRoom = requiredRoom ?? roomInfo;
+        if (!generatedLevelRuntime.TryGetNearestFloorWorldPosition(floorRoom, navMeshPosition, out floorPosition))
+        {
+            return false;
+        }
+
+        if (!NavMesh.SamplePosition(
+                floorPosition,
+                out NavMeshHit floorHit,
+                Mathf.Max(0.05f, companionTeleportNavMeshSampleRadius),
+                NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        floorPosition = floorHit.position;
+        floorPosition.z = navMeshPosition.z;
+
+        return generatedLevelRuntime.TryGetRoomAtWorldPosition(floorPosition, out GeneratedRoomInfo projectedRoom)
+            && projectedRoom != null
+            && (requiredRoom == null || string.Equals(projectedRoom.NodeId, requiredRoom.NodeId, StringComparison.Ordinal));
+    }
+
+    private bool IsTeleportPositionSeparated(Vector3 teleportPosition, List<Vector3> occupiedPositions)
+    {
+        float minSqrDistance = Mathf.Max(0.05f, companionTeleportSeparation);
+        minSqrDistance *= minSqrDistance;
+
+        for (int i = 0; i < occupiedPositions.Count; i++)
+        {
+            if (((Vector2)occupiedPositions[i] - (Vector2)teleportPosition).sqrMagnitude < minSqrDistance)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsTeleportPositionBlockedByCollider(Vector3 teleportPosition)
+    {
+        float checkRadius = Mathf.Max(0.01f, companionTeleportBlockedCheckRadius);
+        int hitCount = Physics2D.OverlapCircleNonAlloc(
+            teleportPosition,
+            checkRadius,
+            companionTeleportOverlapResults,
+            companionTeleportBlockedLayers);
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider2D hitCollider = companionTeleportOverlapResults[i];
+            if (hitCollider == null || hitCollider.isTrigger)
+            {
+                continue;
+            }
+
+            if (hitCollider.GetComponentInParent<PlayerCharacterTemplate>() != null)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -376,41 +553,13 @@ public class PlayerCharacterSwitcher : MonoBehaviour
             Vector2 targetPosition = TryGetTrailPosition(step * companionTrailSpacing, out Vector2 trailPosition)
                 ? trailPosition
                 : (Vector2)activeCharacter.transform.position + GetFormationOffset(step);
-            Vector2 toTarget = targetPosition - (Vector2)character.transform.position;
 
-            if (toTarget.magnitude > companionTeleportDistance
-                && TryGetSafeTeleportPosition(targetPosition, out Vector3 safeTeleportPosition))
-            {
-                character.TeleportTo(safeTeleportPosition);
-                character.SetExternalAiMovementInput(Vector2.zero);
-                continue;
-            }
-
-            character.SetExternalAiMovementInput(toTarget.magnitude > 0.15f ? toTarget.normalized : Vector2.zero);
+            character.SetExternalAiFollowTarget(
+                targetPosition,
+                activeCharacter.transform.position,
+                companionFollowStopDistance,
+                Mathf.Max(companionTrailSpacing * 0.75f, companionFollowStopDistance));
         }
-    }
-
-    private bool TryGetSafeTeleportPosition(Vector3 desiredWorldPosition, out Vector3 safeWorldPosition)
-    {
-        safeWorldPosition = desiredWorldPosition;
-
-        if (generatedLevelRuntime == null)
-        {
-            return false;
-        }
-
-        if (!generatedLevelRuntime.TryGetRoomAtWorldPosition(desiredWorldPosition, out GeneratedRoomInfo roomInfo)
-            || roomInfo == null)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrEmpty(roomInfo.NodeId) && !exploredRoomNodeIds.Contains(roomInfo.NodeId))
-        {
-            return false;
-        }
-
-        return generatedLevelRuntime.TryGetNearestFloorWorldPosition(roomInfo, desiredWorldPosition, out safeWorldPosition);
     }
 
     private void CacheRuntimeReferences()

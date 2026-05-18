@@ -2146,6 +2146,37 @@ MonoBehaviour:
   Width: 1
   SpanId: 347d189b8bc045509add3f981cf6baf6
   BiteDepth: 1
+--- !u!1 &3245012291723411953
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1954589354287150071}
+  m_Layer: 0
+  m_Name: boss
+  m_TagString: Untagged
+  m_Icon: {fileID: 5132851093641282708, guid: 0000000000000000d000000000000000, type: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1954589354287150071
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3245012291723411953}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -0.55, y: -3.73, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 5027845784936059860}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3277167025906749065
 GameObject:
   m_ObjectHideFlags: 0
@@ -3942,6 +3973,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5027845784936059860}
   - component: {fileID: 4992324538920519091}
+  - component: {fileID: 7232608042184618553}
   m_Layer: 0
   m_Name: room_boss
   m_TagString: Untagged
@@ -3967,6 +3999,7 @@ Transform:
   - {fileID: 5801869627838996240}
   - {fileID: 5903665145201242416}
   - {fileID: 4986862104457694658}
+  - {fileID: 1954589354287150071}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &4992324538920519091
@@ -4027,6 +4060,32 @@ MonoBehaviour:
   - {fileID: 3865130034567340916}
   - {fileID: 9173055256853548659}
   - {fileID: 6704278336986398570}
+--- !u!114 &7232608042184618553
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6881860542125881072}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc4c86eda68104a12a6a7ea41fcad846, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableEnemySpawns: 1
+  excludeFromDefaultSpawning: 0
+  spawnPoints:
+  - id: boss
+    point: {fileID: 1954589354287150071}
+    facingDegrees: 0
+    enabled: 1
+  layouts:
+  - id: layout_1
+    weight: 0
+    isEnabled: 1
+    entries:
+    - spawnPointId: boss
+      enemyPrefab: {fileID: 100000, guid: 1148f6277e81435baeefe5346a7dc622, type: 3}
 --- !u!1 &6985691206258636433
 GameObject:
   m_ObjectHideFlags: 0

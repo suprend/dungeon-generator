@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// Персонаж воин
@@ -57,6 +58,7 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
     [SerializeField, Min(0f)] private float thirdAbilityDashDistance = 4f;
     [SerializeField, Min(0.01f)] private float thirdAbilityDashDuration = 0.25f;
     [SerializeField, Min(0f)] private float thirdAbilityHitRadius = 0.65f;
+    [SerializeField, Min(0.05f)] private float thirdAbilityDashNavMeshSampleRadius = 0.35f;
     [SerializeField, Min(0f)] private float thirdAbilitySidePushSpeed = 5f;
     [SerializeField, Min(0f)] private float thirdAbilitySidePushDuration = 0.15f;
     [SerializeField] private LayerMask thirdAbilityLayers = ~0;
@@ -237,6 +239,8 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
 
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(transform.position, aiAttackSearchRadius);
+
+        DrawAiMovementGizmos();
     }
 
     /// <summary>
@@ -353,7 +357,6 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
     {
         isDashing = true;
         SetIncomingAttacksIgnored(true);
-        ApplyDamageResistance(100f, thirdAbilityDashDuration + Time.fixedDeltaTime);
         SaveCharacterColliderTriggerStates();
         SetCharacterCollidersTriggerState(true);
 
@@ -371,11 +374,16 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
                 break;
             }
 
-            Vector2 nextPosition = Vector2.MoveTowards(
+            Vector2 desiredNextPosition = Vector2.MoveTowards(
                 CharacterRigidbody.position,
                 dashEndPosition,
                 dashSpeed * Time.fixedDeltaTime
             );
+
+            if (!TryGetSafeDashStep(CharacterRigidbody.position, desiredNextPosition, out Vector2 nextPosition))
+            {
+                break;
+            }
 
             CharacterRigidbody.MovePosition(nextPosition);
             DamageEnemiesDuringDash(nextPosition, dashDirection, damagedEnemies);
@@ -387,6 +395,36 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
         isDashing = false;
 
         Debug.Log($"{name} рывок воина задел {damagedEnemies.Count} противников");
+    }
+
+    private bool TryGetSafeDashStep(Vector2 currentPosition, Vector2 desiredNextPosition, out Vector2 safeNextPosition)
+    {
+        safeNextPosition = currentPosition;
+        float sampleRadius = Mathf.Max(0.05f, thirdAbilityDashNavMeshSampleRadius);
+
+        if (!NavMesh.SamplePosition(currentPosition, out NavMeshHit currentHit, sampleRadius, NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        if (!NavMesh.SamplePosition(desiredNextPosition, out NavMeshHit nextHit, sampleRadius, NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        Vector2 sampledNextPosition = nextHit.position;
+        if ((sampledNextPosition - desiredNextPosition).sqrMagnitude > sampleRadius * sampleRadius)
+        {
+            return false;
+        }
+
+        if (NavMesh.Raycast(currentHit.position, nextHit.position, out _, NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        safeNextPosition = sampledNextPosition;
+        return true;
     }
 
     /// <summary>

@@ -291,6 +291,8 @@ public class PlayerCharacterMage : PlayerCharacterTemplate
     {
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(transform.position, aiAttackSearchRadius);
+
+        DrawAiMovementGizmos();
     }
 
     /// <summary>

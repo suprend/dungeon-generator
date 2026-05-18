@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// Определяет, кто сейчас управляет персонажем
@@ -19,8 +20,17 @@ public enum PlayerCharacterControlState
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 {
+    private enum AiMovementMode
+    {
+        Idle,
+        ApproachEnemy,
+        RetreatFromEnemy,
+        FollowActiveCharacter
+    }
+
     private const float DamageKnockbackSlowdown = 20f;
     private const float MinDamageKnockbackSqrMagnitude = 0.0001f;
+    private const float MinAiMovementSqrMagnitude = 0.0001f;
     private const float IncapacitatedSpriteRotationZ = 90f;
     private const int ShieldVisualTextureSize = 64;
     private const int AbilityCooldownSlotsCount = 3;
@@ -43,12 +53,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
     [Header("Реакция на урон")]
     [SerializeField, Min(0f)] private float damageKnockbackForce = 4f;
+    [SerializeField, Min(1f)] private float deathKnockbackForceMultiplier = 2f;
     [SerializeField, Min(0f)] private float damageFlashDuration = 0.1f;
     [SerializeField] private Color damageFlashColor = Color.red;
     [SerializeField, Min(0f)] private float damageInvulnerabilityDuration = 1f;
 
     [Header("Отображение щита")]
     [SerializeField, Min(0f)] private float shieldVisualDiameter = 1.6f;
+    [SerializeField] private Vector2 shieldVisualOffset = Vector2.zero;
     [SerializeField] private Color shieldVisualColor = new Color(1f, 0.85f, 0f, 0.35f);
     [SerializeField] private int shieldVisualSortingOrderOffset = 10;
 
@@ -63,6 +75,12 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     [SerializeField] private Vector2 defenceBonusStatusOffset = new Vector2(-0.3f, 1.05f);
     [SerializeField, Min(0f)] private float defenceBonusStatusScale = 1f;
     [SerializeField] private int defenceBonusStatusSortingOrderOffset = 25;
+
+    [Header("Отображение ускорения")]
+    [SerializeField] private Sprite speedBonusStatusSprite;
+    [SerializeField] private Vector2 speedBonusStatusOffset = new Vector2(0.3f, 1.05f);
+    [SerializeField, Min(0f)] private float speedBonusStatusScale = 1f;
+    [SerializeField] private int speedBonusStatusSortingOrderOffset = 25;
 
     [Header("Реакция на лечение")]
     [SerializeField, Min(0f)] private float healingFlashDuration = 0.12f;
@@ -88,6 +106,19 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     [Header("Недееспособность")]
     [SerializeField, Range(0f, 1f)] private float incapacitatedBrightnessMultiplier = 0.45f;
 
+    [Header("AI Movement")]
+    [SerializeField, Min(0f)] private float aiApproachZone = 5f;
+    [SerializeField, Min(0f)] private float aiRetreatZone = 2f;
+    [SerializeField, Min(0f)] private float aiMovementZoneHysteresis = 0.35f;
+    [SerializeField, Min(0f)] private float aiMovementSmoothing = 10f;
+    [SerializeField, Min(0f)] private float aiFollowActiveCharacterStopDistance = 1.1f;
+    [SerializeField, Min(0.05f)] private float aiNavMeshRepathInterval = 0.15f;
+    [SerializeField, Min(0.05f)] private float aiNavMeshSampleRadius = 2f;
+    [SerializeField, Min(0.01f)] private float aiNavMeshAgentRadius = 0.2f;
+    [SerializeField, Min(0.01f)] private float aiNavMeshRepathTargetMoveDistance = 0.45f;
+    [SerializeField] private Color aiApproachZoneGizmoColor = new Color(0.2f, 0.7f, 1f, 0.9f);
+    [SerializeField] private Color aiRetreatZoneGizmoColor = new Color(1f, 0.35f, 0.15f, 0.9f);
+
     [Header("Откаты способностей")]
     [SerializeField, Min(0f)] private float firstAbilityCooldownTime = 3f;
     [SerializeField, Min(0f)] private float secondAbilityCooldownTime = 5f;
@@ -106,6 +137,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private SpriteRenderer shieldVisualRenderer;
     private SpriteRenderer attackBonusStatusRenderer;
     private SpriteRenderer defenceBonusStatusRenderer;
+    private SpriteRenderer speedBonusStatusRenderer;
     private Transform healthBarRoot;
     private SpriteRenderer healthBarBackgroundRenderer;
     private SpriteRenderer healthBarFillRenderer;
@@ -114,8 +146,13 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private SpriteRenderer[] abilityCooldownFillRenderers;
     private Vector2 movementInput;
     private Vector2 externalAiMovementInput;
+    private Vector2 externalAiFollowTarget;
+    private Vector2 externalAiFollowFallbackTarget;
+    private Vector2 smoothedAiMovementInput;
     private Vector2 lastMovementInputDirection = Vector2.right;
     private Vector2 damageKnockbackVelocity;
+    private NavMeshAgent aiNavMeshAgent;
+    private NavMeshPath aiNavMeshPath;
     private readonly Collider2D[] interactionOverlapResults = new Collider2D[16];
     private IInteractable currentInteractable;
     private Coroutine damageResistanceCoroutine;
@@ -131,6 +168,15 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private float currentMovementSpeedMultiplier = 1f;
     private float currentDamageBonusPercent;
     private float currentShieldAmount;
+    private float externalAiFollowStopDistance;
+    private float externalAiFollowFallbackStopDistance;
+    private float nextAiNavMeshRepathTime;
+    private Vector3 currentAiNavMeshDestination;
+    private int currentAiNavMeshCornerIndex;
+    private AiMovementMode aiMovementMode;
+    private bool hasExternalAiFollowTarget;
+    private bool hasExternalAiFollowFallbackTarget;
+    private bool hasUsableAiNavMeshPath;
     private bool isDamageInvulnerable;
     private bool isIgnoringIncomingAttacks;
 
@@ -162,7 +208,17 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     /// </summary>
     public static bool CanPlayerAttackDamageTarget(IDamageable target)
     {
-        return target != null && target.IsAlive && !(target is PlayerCharacterTemplate);
+        if (target == null || !target.IsAlive || target is PlayerCharacterTemplate)
+            return false;
+
+        if (target is Health health)
+        {
+            var enemyAgent = health.GetComponentInParent<EnemyAgentRuntime>();
+            if (enemyAgent != null && !enemyAgent.ActiveAI)
+                return false;
+        }
+
+        return true;
     }
 
     protected virtual void Awake()
@@ -178,12 +234,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         CreateShieldVisual();
         CreateAttackBonusStatusVisual();
         CreateDefenceBonusStatusVisual();
+        CreateSpeedBonusStatusVisual();
         CreateHealthBarVisual();
         CreateAbilityCooldownVisual();
         CacheSpriteRenderers();
         UpdateShieldVisual();
         UpdateAttackBonusStatusVisual();
         UpdateDefenceBonusStatusVisual();
+        UpdateSpeedBonusStatusVisual();
         UpdateHealthBarVisual();
         UpdateAbilityCooldownVisual();
 
@@ -201,6 +259,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
     protected virtual void OnDisable()
     {
+        SetAiNavMeshActive(false);
         InteractionPromptHud.Hide(this);
         currentInteractable = null;
     }
@@ -212,6 +271,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         if (!IsAlive)
         {
             movementInput = Vector2.zero;
+            SetAiNavMeshActive(false);
             ClearCurrentInteractable();
             return;
         }
@@ -247,24 +307,55 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     {
         if (controlState == newControlState)
         {
+            SetAiNavMeshActive(newControlState == PlayerCharacterControlState.AiControlled && IsAlive);
             return;
         }
 
         PlayerCharacterControlState previousControlState = controlState;
         controlState = newControlState;
         movementInput = Vector2.zero;
+        smoothedAiMovementInput = Vector2.zero;
+        externalAiMovementInput = Vector2.zero;
+        hasExternalAiFollowTarget = false;
+        hasExternalAiFollowFallbackTarget = false;
+        hasUsableAiNavMeshPath = false;
+        aiMovementMode = AiMovementMode.Idle;
+        SetAiNavMeshActive(newControlState == PlayerCharacterControlState.AiControlled && IsAlive);
 
         OnControlStateChanged(previousControlState, controlState);
     }
 
     public void SetExternalAiMovementInput(Vector2 input)
     {
+        hasExternalAiFollowTarget = false;
         externalAiMovementInput = input.sqrMagnitude > 1f ? input.normalized : input;
 
         if (externalAiMovementInput.sqrMagnitude > 0.0001f)
         {
             lastMovementInputDirection = externalAiMovementInput.normalized;
         }
+    }
+
+    public void SetExternalAiFollowTarget(Vector2 targetPosition, float stopDistance = 0f)
+    {
+        SetExternalAiFollowTarget(targetPosition, targetPosition, stopDistance, stopDistance);
+    }
+
+    public void SetExternalAiFollowTarget(
+        Vector2 targetPosition,
+        Vector2 fallbackTargetPosition,
+        float stopDistance = 0f,
+        float fallbackStopDistance = 0f)
+    {
+        hasExternalAiFollowTarget = true;
+        hasExternalAiFollowFallbackTarget = true;
+        externalAiFollowTarget = targetPosition;
+        externalAiFollowFallbackTarget = fallbackTargetPosition;
+        externalAiFollowStopDistance = Mathf.Max(0f, stopDistance);
+        externalAiFollowFallbackStopDistance = Mathf.Max(0f, fallbackStopDistance);
+        externalAiMovementInput = Vector2.zero;
+
+        SetAiNavMeshActive(IsAiControlled && IsAlive);
     }
 
     public void TeleportTo(Vector3 worldPosition)
@@ -276,6 +367,11 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         damageKnockbackVelocity = Vector2.zero;
         externalAiMovementInput = Vector2.zero;
+        hasExternalAiFollowTarget = false;
+        hasExternalAiFollowFallbackTarget = false;
+        hasUsableAiNavMeshPath = false;
+        smoothedAiMovementInput = Vector2.zero;
+        aiMovementMode = AiMovementMode.Idle;
         movementInput = Vector2.zero;
 
         if (characterRigidbody != null)
@@ -286,6 +382,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         transform.position = worldPosition;
         Physics2D.SyncTransforms();
+        WarpAiNavMeshAgentToCurrentPosition();
     }
 
     /// <summary>
@@ -460,6 +557,710 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     /// </summary>
     protected virtual void FixedUpdateAiControl()
     {
+        if (TryGetPriorityAiMovementInput(out Vector2 priorityMovementInput))
+        {
+            SetAiMovementInput(priorityMovementInput);
+            return;
+        }
+
+        if (hasExternalAiFollowTarget)
+        {
+            SetAiMovementInput(GetExternalAiFollowMovementInput());
+            return;
+        }
+
+        if (externalAiMovementInput.sqrMagnitude > MinAiMovementSqrMagnitude)
+        {
+            smoothedAiMovementInput = externalAiMovementInput;
+            return;
+        }
+
+        SetAiMovementInput(GetAiMovementInput());
+    }
+
+    private Vector2 GetExternalAiFollowMovementInput()
+    {
+        return GetNavMeshMovementInputToPosition(externalAiFollowTarget, externalAiFollowStopDistance);
+    }
+
+    private bool TryGetPriorityAiMovementInput(out Vector2 movementInput)
+    {
+        movementInput = Vector2.zero;
+
+        if (!IsAlive)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+            return false;
+        }
+
+        if (Input.GetKey(KeyCode.Space))
+        {
+            PlayerCharacterTemplate activeCharacter = FindActivePlayerControlledCharacter();
+            if (activeCharacter != null)
+            {
+                aiMovementMode = AiMovementMode.FollowActiveCharacter;
+                movementInput = GetNavMeshMovementInputToPosition(
+                    activeCharacter.transform.position,
+                    aiFollowActiveCharacterStopDistance);
+                return true;
+            }
+
+            aiMovementMode = AiMovementMode.Idle;
+            return true;
+        }
+
+        if (aiMovementMode == AiMovementMode.FollowActiveCharacter)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        Component closestEnemy = FindClosestAliveEnemyTargetInScene();
+        if (closestEnemy == null)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+            return false;
+        }
+
+        Vector2 enemyPosition = closestEnemy.transform.position;
+        Vector2 currentPosition = transform.position;
+        Vector2 directionToEnemy = enemyPosition - currentPosition;
+        float distanceToEnemy = directionToEnemy.magnitude;
+        float retreatZone = Mathf.Max(0f, aiRetreatZone);
+        float approachZone = Mathf.Max(retreatZone, aiApproachZone);
+        float hysteresis = Mathf.Max(0f, aiMovementZoneHysteresis);
+        float retreatStopDistance = Mathf.Min(approachZone, retreatZone + hysteresis);
+        float approachStopDistance = Mathf.Max(retreatZone, approachZone - hysteresis);
+
+        if (aiMovementMode == AiMovementMode.RetreatFromEnemy
+            && distanceToEnemy >= retreatStopDistance)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachEnemy
+            && distanceToEnemy <= approachStopDistance)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        if (aiMovementMode == AiMovementMode.Idle)
+        {
+            if (distanceToEnemy < retreatZone)
+            {
+                aiMovementMode = AiMovementMode.RetreatFromEnemy;
+            }
+            else if (distanceToEnemy > approachZone)
+            {
+                aiMovementMode = AiMovementMode.ApproachEnemy;
+            }
+        }
+
+        if (directionToEnemy.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            return false;
+        }
+
+        if (aiMovementMode == AiMovementMode.RetreatFromEnemy)
+        {
+            Vector2 retreatTarget = currentPosition - directionToEnemy.normalized * Mathf.Max(retreatZone, 1f);
+            movementInput = GetNavMeshMovementInputToPosition(retreatTarget, 0f);
+            if (movementInput.sqrMagnitude <= MinAiMovementSqrMagnitude)
+            {
+                movementInput = -directionToEnemy.normalized;
+            }
+
+            return true;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachEnemy)
+        {
+            movementInput = GetNavMeshMovementInputToPosition(enemyPosition, approachStopDistance);
+            return movementInput.sqrMagnitude > MinAiMovementSqrMagnitude;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Выбирает направление движения персонажа под управлением ИИ
+    /// </summary>
+    private Vector2 GetAiMovementInput()
+    {
+        if (!IsAlive)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+            return Vector2.zero;
+        }
+
+        if (Input.GetKey(KeyCode.Space))
+        {
+            PlayerCharacterTemplate activeCharacter = FindActivePlayerControlledCharacter();
+            if (activeCharacter != null)
+            {
+                aiMovementMode = AiMovementMode.FollowActiveCharacter;
+                return GetDirectionToPosition(
+                    activeCharacter.transform.position,
+                    aiFollowActiveCharacterStopDistance);
+            }
+
+            aiMovementMode = AiMovementMode.Idle;
+        }
+        else if (aiMovementMode == AiMovementMode.FollowActiveCharacter)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        Component closestEnemy = FindClosestAliveEnemyTargetInScene();
+        if (closestEnemy == null)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+            return Vector2.zero;
+        }
+
+        Vector2 directionToEnemy = (Vector2)closestEnemy.transform.position - (Vector2)transform.position;
+        float distanceToEnemy = directionToEnemy.magnitude;
+        float retreatZone = Mathf.Max(0f, aiRetreatZone);
+        float approachZone = Mathf.Max(retreatZone, aiApproachZone);
+        float hysteresis = Mathf.Max(0f, aiMovementZoneHysteresis);
+        float retreatStopDistance = Mathf.Min(approachZone, retreatZone + hysteresis);
+        float approachStopDistance = Mathf.Max(retreatZone, approachZone - hysteresis);
+
+        if (aiMovementMode == AiMovementMode.RetreatFromEnemy
+            && distanceToEnemy >= retreatStopDistance)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachEnemy
+            && distanceToEnemy <= approachStopDistance)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        if (aiMovementMode == AiMovementMode.Idle)
+        {
+            if (distanceToEnemy < retreatZone)
+            {
+                aiMovementMode = AiMovementMode.RetreatFromEnemy;
+            }
+            else if (distanceToEnemy > approachZone)
+            {
+                aiMovementMode = AiMovementMode.ApproachEnemy;
+            }
+        }
+
+        if (directionToEnemy.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            return Vector2.zero;
+        }
+
+        if (aiMovementMode == AiMovementMode.RetreatFromEnemy)
+        {
+            return -directionToEnemy.normalized;
+        }
+
+        if (aiMovementMode == AiMovementMode.ApproachEnemy)
+        {
+            return directionToEnemy.normalized;
+        }
+
+        return Vector2.zero;
+    }
+
+    private Vector2 GetNavMeshMovementInputToPosition(Vector2 targetPosition, float stopDistance)
+    {
+        Vector2 directDirection = GetDirectionToPosition(targetPosition, stopDistance);
+        if (directDirection.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            StopAiNavMeshMovement();
+            return Vector2.zero;
+        }
+
+        if (!TryEnsureAiNavMeshAgent(out NavMeshAgent agent))
+        {
+            return directDirection;
+        }
+
+        SyncAiNavMeshAgentToTransform();
+        UpdateAiNavMeshDestination(targetPosition);
+
+        if (!agent.isOnNavMesh)
+        {
+            return directDirection;
+        }
+
+        if (TryGetAiNavMeshPathDirection(out Vector2 navMeshDirection))
+        {
+            return navMeshDirection;
+        }
+
+        return directDirection;
+    }
+
+    private void SetAiMovementInput(Vector2 newMovementInput)
+    {
+        Vector2 targetMovementInput = newMovementInput.sqrMagnitude > MinAiMovementSqrMagnitude
+            ? Vector2.ClampMagnitude(newMovementInput, 1f)
+            : Vector2.zero;
+        float smoothing = Mathf.Max(0f, aiMovementSmoothing);
+
+        smoothedAiMovementInput = smoothing > 0f
+            ? Vector2.MoveTowards(
+                smoothedAiMovementInput,
+                targetMovementInput,
+                smoothing * Time.fixedDeltaTime)
+            : targetMovementInput;
+
+        movementInput = smoothedAiMovementInput.sqrMagnitude > MinAiMovementSqrMagnitude
+            ? Vector2.ClampMagnitude(smoothedAiMovementInput, 1f)
+            : Vector2.zero;
+
+        if (movementInput.sqrMagnitude > MinAiMovementSqrMagnitude)
+        {
+            lastMovementInputDirection = movementInput.normalized;
+        }
+    }
+
+    private Vector2 GetDirectionToPosition(Vector2 targetPosition, float stopDistance = 0f)
+    {
+        Vector2 direction = targetPosition - (Vector2)transform.position;
+        float stopDistanceSqr = Mathf.Max(0f, stopDistance) * Mathf.Max(0f, stopDistance);
+        float distance = direction.magnitude;
+
+        if (direction.sqrMagnitude <= Mathf.Max(MinAiMovementSqrMagnitude, stopDistanceSqr))
+        {
+            return Vector2.zero;
+        }
+
+        float slowdownDistance = Mathf.Max(0.01f, stopDistance);
+        float speedScale = Mathf.Clamp01((distance - stopDistance) / slowdownDistance);
+
+        return direction.normalized * speedScale;
+    }
+
+    private bool TryEnsureAiNavMeshAgent(out NavMeshAgent agent)
+    {
+        agent = GetOrCreateAiNavMeshAgent();
+        if (agent == null || !IsAiControlled || !IsAlive)
+        {
+            return false;
+        }
+
+        if (!agent.enabled)
+        {
+            SetAiNavMeshActive(true);
+        }
+
+        return agent.enabled && EnsureAiNavMeshAgentOnNavMesh();
+    }
+
+    private NavMeshAgent GetOrCreateAiNavMeshAgent()
+    {
+        if (aiNavMeshAgent == null && !TryGetComponent(out aiNavMeshAgent))
+        {
+            aiNavMeshAgent = gameObject.AddComponent<NavMeshAgent>();
+        }
+
+        ConfigureAiNavMeshAgent();
+        return aiNavMeshAgent;
+    }
+
+    private void ConfigureAiNavMeshAgent()
+    {
+        if (aiNavMeshAgent == null)
+        {
+            return;
+        }
+
+        if (aiNavMeshPath == null)
+        {
+            aiNavMeshPath = new NavMeshPath();
+        }
+
+        aiNavMeshAgent.updatePosition = false;
+        aiNavMeshAgent.updateRotation = false;
+        aiNavMeshAgent.updateUpAxis = false;
+        aiNavMeshAgent.radius = Mathf.Max(0.01f, aiNavMeshAgentRadius);
+        aiNavMeshAgent.height = 1f;
+        aiNavMeshAgent.baseOffset = 0f;
+        aiNavMeshAgent.speed = Mathf.Max(0.01f, MovementSpeed);
+        aiNavMeshAgent.acceleration = Mathf.Max(aiNavMeshAgent.speed * 3f, 8f);
+        aiNavMeshAgent.angularSpeed = 120f;
+        aiNavMeshAgent.stoppingDistance = Mathf.Max(0f, externalAiFollowStopDistance);
+    }
+
+    private void SetAiNavMeshActive(bool isActive)
+    {
+        if (!isActive)
+        {
+            if (aiNavMeshAgent == null)
+            {
+                TryGetComponent(out aiNavMeshAgent);
+            }
+
+            if (aiNavMeshAgent != null && aiNavMeshAgent.enabled)
+            {
+                StopAiNavMeshMovement();
+                aiNavMeshAgent.enabled = false;
+            }
+
+            return;
+        }
+
+        NavMeshAgent agent = GetOrCreateAiNavMeshAgent();
+        if (agent == null)
+        {
+            return;
+        }
+
+        ConfigureAiNavMeshAgent();
+        if (agent.enabled)
+        {
+            return;
+        }
+
+        agent.enabled = true;
+        nextAiNavMeshRepathTime = 0f;
+        WarpAiNavMeshAgentToCurrentPosition();
+        StopAiNavMeshMovement();
+    }
+
+    private void StopAiNavMeshMovement()
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled)
+        {
+            return;
+        }
+
+        if (aiNavMeshAgent.isOnNavMesh)
+        {
+            aiNavMeshAgent.isStopped = true;
+            aiNavMeshAgent.ResetPath();
+        }
+
+        hasUsableAiNavMeshPath = false;
+        currentAiNavMeshCornerIndex = 0;
+    }
+
+    private void UpdateAiNavMeshDestination(Vector2 targetPosition)
+    {
+        UpdateAiNavMeshDestination(targetPosition, false);
+    }
+
+    private void UpdateAiNavMeshDestination(Vector2 targetPosition, bool forceRepath)
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled || !aiNavMeshAgent.isOnNavMesh)
+        {
+            return;
+        }
+
+        if (!forceRepath
+            && hasUsableAiNavMeshPath
+            && ((Vector2)currentAiNavMeshDestination - targetPosition).sqrMagnitude
+                <= aiNavMeshRepathTargetMoveDistance * aiNavMeshRepathTargetMoveDistance)
+        {
+            return;
+        }
+
+        if (!forceRepath && Time.time < nextAiNavMeshRepathTime)
+        {
+            return;
+        }
+
+        nextAiNavMeshRepathTime = Time.time + Mathf.Max(0.05f, aiNavMeshRepathInterval);
+        ConfigureAiNavMeshAgent();
+
+        if (!TryResolveAiNavMeshDestination(targetPosition, out Vector3 destination))
+        {
+            return;
+        }
+
+        currentAiNavMeshDestination = destination;
+        currentAiNavMeshCornerIndex = FindFirstReachableAiNavMeshCornerIndex();
+        aiNavMeshAgent.isStopped = false;
+        aiNavMeshAgent.nextPosition = transform.position;
+    }
+
+    private bool EnsureAiNavMeshAgentOnNavMesh()
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled)
+        {
+            return false;
+        }
+
+        if (aiNavMeshAgent.isOnNavMesh)
+        {
+            return true;
+        }
+
+        return TrySampleNavMeshPosition(transform.position, GetAiNavMeshAgentSnapSampleRadius(), out Vector3 sampledPosition)
+            && aiNavMeshAgent.Warp(sampledPosition);
+    }
+
+    private void WarpAiNavMeshAgentToCurrentPosition()
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled)
+        {
+            return;
+        }
+
+        if (TrySampleNavMeshPosition(transform.position, GetAiNavMeshAgentSnapSampleRadius(), out Vector3 sampledPosition))
+        {
+            aiNavMeshAgent.Warp(sampledPosition);
+        }
+    }
+
+    private void SyncAiNavMeshAgentToTransform()
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled)
+        {
+            return;
+        }
+
+        aiNavMeshAgent.nextPosition = transform.position;
+    }
+
+    private bool TrySampleNavMeshPosition(Vector3 sourcePosition, float sampleRadius, out Vector3 sampledPosition)
+    {
+        if (NavMesh.SamplePosition(sourcePosition, out NavMeshHit hit, Mathf.Max(0.05f, sampleRadius), NavMesh.AllAreas))
+        {
+            sampledPosition = hit.position;
+            sampledPosition.z = sourcePosition.z;
+            return true;
+        }
+
+        sampledPosition = sourcePosition;
+        return false;
+    }
+
+    private bool TryResolveAiNavMeshDestination(Vector2 targetPosition, out Vector3 destination)
+    {
+        if (TryResolveSampledAiNavMeshDestination(targetPosition, out destination))
+        {
+            return true;
+        }
+
+        if (hasExternalAiFollowFallbackTarget
+            && TryResolveSampledAiNavMeshDestination(
+                ResolveFallbackFollowTargetPosition(),
+                out destination))
+        {
+            return true;
+        }
+
+        destination = transform.position;
+        return false;
+    }
+
+    private bool TryResolveSampledAiNavMeshDestination(Vector2 targetPosition, out Vector3 destination)
+    {
+        destination = transform.position;
+
+        if (!TrySampleNavMeshPosition(targetPosition, GetAiNavMeshTargetSampleRadius(), out Vector3 sampledTarget))
+        {
+            return false;
+        }
+
+        if (((Vector2)sampledTarget - (Vector2)transform.position).sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            return false;
+        }
+
+        if (!TryCalculateCompleteAiNavMeshPath(sampledTarget))
+        {
+            return false;
+        }
+
+        destination = sampledTarget;
+        hasUsableAiNavMeshPath = true;
+        return true;
+    }
+
+    private bool TryCalculateCompleteAiNavMeshPath(Vector3 destination)
+    {
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled)
+        {
+            return false;
+        }
+
+        if (aiNavMeshPath == null)
+        {
+            aiNavMeshPath = new NavMeshPath();
+        }
+
+        if (!aiNavMeshAgent.CalculatePath(destination, aiNavMeshPath)
+            || aiNavMeshPath.status != NavMeshPathStatus.PathComplete)
+        {
+            return false;
+        }
+
+        return aiNavMeshPath.corners != null && aiNavMeshPath.corners.Length > 1;
+    }
+
+    private Vector2 ResolveFallbackFollowTargetPosition()
+    {
+        Vector2 fromFallbackTarget = (Vector2)transform.position - externalAiFollowFallbackTarget;
+        if (fromFallbackTarget.sqrMagnitude <= MinAiMovementSqrMagnitude)
+        {
+            fromFallbackTarget = lastMovementInputDirection.sqrMagnitude > MinAiMovementSqrMagnitude
+                ? -lastMovementInputDirection.normalized
+                : Vector2.down;
+        }
+
+        return externalAiFollowFallbackTarget
+            + fromFallbackTarget.normalized * externalAiFollowFallbackStopDistance;
+    }
+
+    private bool TryGetAiNavMeshPathDirection(out Vector2 direction)
+    {
+        direction = Vector2.zero;
+
+        if (aiNavMeshAgent == null || !aiNavMeshAgent.enabled || !hasUsableAiNavMeshPath)
+        {
+            return false;
+        }
+
+        Vector2 currentPosition = transform.position;
+        Vector3[] corners = aiNavMeshPath != null && aiNavMeshPath.status == NavMeshPathStatus.PathComplete
+            ? aiNavMeshPath.corners
+            : null;
+        float cornerReachDistance = Mathf.Max(aiNavMeshAgent.radius * 0.5f, 0.1f);
+
+        if (corners == null || corners.Length == 0)
+        {
+            return false;
+        }
+
+        currentAiNavMeshCornerIndex = Mathf.Clamp(currentAiNavMeshCornerIndex, 0, corners.Length - 1);
+        while (currentAiNavMeshCornerIndex < corners.Length - 1
+            && Vector2.Distance(currentPosition, corners[currentAiNavMeshCornerIndex]) <= cornerReachDistance)
+        {
+            currentAiNavMeshCornerIndex++;
+        }
+
+        Vector2 toCorner = (Vector2)corners[currentAiNavMeshCornerIndex] - currentPosition;
+        if (toCorner.magnitude <= cornerReachDistance)
+        {
+            return false;
+        }
+
+        direction = toCorner.normalized;
+        return true;
+    }
+
+    private int FindFirstReachableAiNavMeshCornerIndex()
+    {
+        if (aiNavMeshPath == null
+            || aiNavMeshPath.status != NavMeshPathStatus.PathComplete
+            || aiNavMeshPath.corners == null
+            || aiNavMeshPath.corners.Length == 0)
+        {
+            return 0;
+        }
+
+        Vector2 currentPosition = transform.position;
+        float cornerReachDistance = aiNavMeshAgent != null
+            ? Mathf.Max(aiNavMeshAgent.radius * 0.5f, 0.1f)
+            : 0.1f;
+
+        for (int i = 0; i < aiNavMeshPath.corners.Length; i++)
+        {
+            if (Vector2.Distance(currentPosition, aiNavMeshPath.corners[i]) > cornerReachDistance)
+            {
+                return i;
+            }
+        }
+
+        return Mathf.Max(0, aiNavMeshPath.corners.Length - 1);
+    }
+
+    private float GetAiNavMeshAgentSnapSampleRadius()
+    {
+        float agentRadius = aiNavMeshAgent != null ? aiNavMeshAgent.radius : 0.35f;
+        return Mathf.Min(aiNavMeshSampleRadius, Mathf.Max(0.15f, agentRadius * 0.75f));
+    }
+
+    private float GetAiNavMeshTargetSampleRadius()
+    {
+        float agentRadius = aiNavMeshAgent != null ? aiNavMeshAgent.radius : 0.35f;
+        float minRadius = Mathf.Max(0.2f, agentRadius);
+        return Mathf.Min(aiNavMeshSampleRadius, Mathf.Max(minRadius, externalAiFollowStopDistance));
+    }
+
+    private PlayerCharacterTemplate FindActivePlayerControlledCharacter()
+    {
+        ActivePlayerCharacters.RemoveAll(character => character == null);
+
+        for (int i = 0; i < ActivePlayerCharacters.Count; i++)
+        {
+            PlayerCharacterTemplate character = ActivePlayerCharacters[i];
+
+            if (character != null && character != this && character.IsAlive && character.IsPlayerControlled)
+            {
+                return character;
+            }
+        }
+
+        return null;
+    }
+
+    private Component FindClosestAliveEnemyTargetInScene()
+    {
+        EnemyTemplate[] enemies = FindObjectsByType<EnemyTemplate>(FindObjectsSortMode.None);
+        Component closestEnemy = null;
+        float closestSqrDistance = float.PositiveInfinity;
+
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            EnemyTemplate enemy = enemies[i];
+
+            if (enemy == null || !enemy.IsAlive)
+            {
+                continue;
+            }
+
+            float sqrDistance = ((Vector2)enemy.transform.position - (Vector2)transform.position).sqrMagnitude;
+
+            if (sqrDistance >= closestSqrDistance)
+            {
+                continue;
+            }
+
+            closestSqrDistance = sqrDistance;
+            closestEnemy = enemy;
+        }
+
+        Health[] healthTargets = FindObjectsByType<Health>(FindObjectsSortMode.None);
+        for (int i = 0; i < healthTargets.Length; i++)
+        {
+            Health health = healthTargets[i];
+
+            if (!CanPlayerAttackDamageTarget(health))
+            {
+                continue;
+            }
+
+            float sqrDistance = ((Vector2)health.transform.position - (Vector2)transform.position).sqrMagnitude;
+
+            if (sqrDistance >= closestSqrDistance)
+            {
+                continue;
+            }
+
+            closestSqrDistance = sqrDistance;
+            closestEnemy = health;
+        }
+
+        return closestEnemy;
+    }
+
+    protected void DrawAiMovementGizmos()
+    {
+        Gizmos.color = aiApproachZoneGizmoColor;
+        Gizmos.DrawWireSphere(transform.position, aiApproachZone);
+
+        Gizmos.color = aiRetreatZoneGizmoColor;
+        Gizmos.DrawWireSphere(transform.position, aiRetreatZone);
     }
 
     /// <summary>
@@ -481,7 +1282,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         {
             inputVelocity = IsPlayerControlled
                 ? movementInput * MovementSpeed
-                : externalAiMovementInput * MovementSpeed;
+                : GetCurrentAiMovementInput() * MovementSpeed;
         }
 
         Vector2 nextPosition = characterRigidbody.position + (inputVelocity + damageKnockbackVelocity) * Time.fixedDeltaTime;
@@ -490,6 +1291,13 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         characterRigidbody.velocity = Vector2.zero;
 
         UpdateDamageKnockbackVelocity();
+    }
+
+    private Vector2 GetCurrentAiMovementInput()
+    {
+        return externalAiMovementInput.sqrMagnitude > MinAiMovementSqrMagnitude
+            ? externalAiMovementInput
+            : movementInput;
     }
 
     /// <summary>
@@ -1073,6 +1881,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         if (!IsAlive)
         {
+            ApplyDeathKnockback(knockbackDirection, knockbackForce);
             BecomeIncapacitated();
             return;
         }
@@ -1088,10 +1897,18 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         StartDamageFlash();
     }
 
+    private void ApplyDeathKnockback(Vector2 knockbackDirection, float knockbackForce)
+    {
+        ApplyDamageKnockback(knockbackDirection, knockbackForce, deathKnockbackForceMultiplier);
+    }
+
     /// <summary>
     /// Отталкивает персонажа в направлении удара
     /// </summary>
-    private void ApplyDamageKnockback(Vector2 knockbackDirection, float knockbackForce)
+    private void ApplyDamageKnockback(
+        Vector2 knockbackDirection,
+        float knockbackForce,
+        float forceMultiplier = 1f)
     {
         if (characterRigidbody == null || knockbackDirection.sqrMagnitude <= 0.0001f)
         {
@@ -1106,7 +1923,9 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         }
 
         characterRigidbody.velocity = Vector2.zero;
-        damageKnockbackVelocity = knockbackDirection.normalized * finalKnockbackForce;
+        damageKnockbackVelocity = knockbackDirection.normalized
+            * finalKnockbackForce
+            * Mathf.Max(1f, forceMultiplier);
     }
 
     /// <summary>
@@ -1292,8 +2111,11 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private void BecomeIncapacitated()
     {
         movementInput = Vector2.zero;
+        externalAiMovementInput = Vector2.zero;
+        hasExternalAiFollowTarget = false;
         damageKnockbackVelocity = Vector2.zero;
         isIgnoringIncomingAttacks = false;
+        SetAiNavMeshActive(false);
 
         if (characterFlashCoroutine != null)
         {
@@ -1310,6 +2132,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         SetIncapacitatedSpriteRotation(true);
         UpdateAttackBonusStatusVisual();
         UpdateDefenceBonusStatusVisual();
+        UpdateSpeedBonusStatusVisual();
     }
 
     /// <summary>
@@ -1321,6 +2144,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         RestoreCharacterBodyColors();
         UpdateAttackBonusStatusVisual();
         UpdateDefenceBonusStatusVisual();
+        SetAiNavMeshActive(IsAiControlled);
     }
 
     /// <summary>
@@ -1495,7 +2319,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         GameObject shieldVisualObject = new GameObject("ShieldVisual");
         shieldVisualObject.transform.SetParent(transform, false);
-        shieldVisualObject.transform.localPosition = Vector3.zero;
+        shieldVisualObject.transform.localPosition = new Vector3(shieldVisualOffset.x, shieldVisualOffset.y, 0f);
 
         shieldVisualRenderer = shieldVisualObject.AddComponent<SpriteRenderer>();
         shieldVisualRenderer.sprite = GetShieldVisualSprite();
@@ -1586,7 +2410,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         }
 
         float visualDiameter = Mathf.Max(0f, shieldVisualDiameter);
-        shieldVisualRenderer.transform.localPosition = Vector3.zero;
+        shieldVisualRenderer.transform.localPosition = new Vector3(shieldVisualOffset.x, shieldVisualOffset.y, 0f);
         shieldVisualRenderer.transform.localScale = new Vector3(visualDiameter, visualDiameter, 1f);
     }
 
@@ -1826,6 +2650,108 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         defenceBonusStatusRenderer.sortingLayerID = sortingLayerId;
         defenceBonusStatusRenderer.sortingOrder = highestSortingOrder + defenceBonusStatusSortingOrderOffset;
+    }
+
+    /// <summary>
+    /// Создает дочерний спрайт статуса ускорения
+    /// </summary>
+    private void CreateSpeedBonusStatusVisual()
+    {
+        if (speedBonusStatusRenderer != null)
+        {
+            return;
+        }
+
+        GameObject speedBonusStatusObject = new GameObject("SpeedBonusStatusVisual");
+        speedBonusStatusObject.transform.SetParent(transform, false);
+
+        speedBonusStatusRenderer = speedBonusStatusObject.AddComponent<SpriteRenderer>();
+        speedBonusStatusRenderer.sprite = speedBonusStatusSprite;
+        RefreshSpeedBonusStatusVisualTransform();
+        RefreshSpeedBonusStatusVisualSorting();
+        speedBonusStatusObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Показывает или скрывает спрайт ускорения над персонажем
+    /// </summary>
+    private void UpdateSpeedBonusStatusVisual()
+    {
+        if (speedBonusStatusRenderer == null)
+        {
+            CreateSpeedBonusStatusVisual();
+        }
+
+        if (speedBonusStatusRenderer == null)
+        {
+            return;
+        }
+
+        bool shouldShowStatus = IsAlive && currentMovementSpeedMultiplier > 1f && speedBonusStatusSprite != null;
+        speedBonusStatusRenderer.gameObject.SetActive(shouldShowStatus);
+
+        if (!shouldShowStatus)
+        {
+            return;
+        }
+
+        speedBonusStatusRenderer.sprite = speedBonusStatusSprite;
+        RefreshSpeedBonusStatusVisualTransform();
+        RefreshSpeedBonusStatusVisualSorting();
+    }
+
+    /// <summary>
+    /// Расставляет спрайт ускорения над персонажем
+    /// </summary>
+    private void RefreshSpeedBonusStatusVisualTransform()
+    {
+        if (speedBonusStatusRenderer == null)
+        {
+            return;
+        }
+
+        speedBonusStatusRenderer.transform.localPosition = new Vector3(
+            speedBonusStatusOffset.x,
+            speedBonusStatusOffset.y,
+            0f);
+        speedBonusStatusRenderer.transform.localScale = new Vector3(
+            speedBonusStatusScale,
+            speedBonusStatusScale,
+            1f);
+    }
+
+    /// <summary>
+    /// Поднимает спрайт ускорения поверх тела и интерфейса персонажа
+    /// </summary>
+    private void RefreshSpeedBonusStatusVisualSorting()
+    {
+        if (speedBonusStatusRenderer == null)
+        {
+            return;
+        }
+
+        int highestSortingOrder = 0;
+        int sortingLayerId = speedBonusStatusRenderer.sortingLayerID;
+
+        if (spriteRenderers != null)
+        {
+            for (int i = 0; i < spriteRenderers.Length; i++)
+            {
+                if (spriteRenderers[i] == null)
+                {
+                    continue;
+                }
+
+                if (i == 0 || spriteRenderers[i].sortingOrder >= highestSortingOrder)
+                {
+                    highestSortingOrder = spriteRenderers[i].sortingOrder;
+                    sortingLayerId = spriteRenderers[i].sortingLayerID;
+                }
+            }
+        }
+
+        speedBonusStatusRenderer.sortingLayerID = sortingLayerId;
+        speedBonusStatusRenderer.sortingOrder = highestSortingOrder + speedBonusStatusSortingOrderOffset;
     }
 
     /// <summary>
@@ -2290,11 +3216,13 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private IEnumerator ApplyMovementSpeedMultiplierCoroutine(float speedMultiplier, float duration)
     {
         currentMovementSpeedMultiplier = speedMultiplier;
+        UpdateSpeedBonusStatusVisual();
         Debug.Log($"{name} скорость передвижения x{currentMovementSpeedMultiplier:0.00} на {duration:0.0} сек");
 
         yield return new WaitForSeconds(duration);
 
         currentMovementSpeedMultiplier = 1f;
+        UpdateSpeedBonusStatusVisual();
         movementSpeedMultiplierCoroutine = null;
 
         Debug.Log($"{name} бонус скорости закончился");

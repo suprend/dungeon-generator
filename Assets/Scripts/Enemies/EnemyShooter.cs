@@ -23,6 +23,17 @@ public class EnemyShooter : EnemyTemplate
         nextShotTime = Time.time;
     }
 
+    private void FixedUpdate()
+    {
+        if (!IsAlive)
+        {
+            ResetAiDistanceMovement();
+            return;
+        }
+
+        MoveWithAiDistancesToTarget(FindClosestAlivePlayerCharacter());
+    }
+
     private void Update()
     {
         if (!IsAlive || IsStunned || projectilePrefab == null || Time.time < nextShotTime)
@@ -30,13 +41,20 @@ public class EnemyShooter : EnemyTemplate
             return;
         }
 
-        Shoot();
+        PlayerCharacterTemplate targetCharacter = FindClosestAlivePlayerCharacterInAiAttackZone();
+
+        if (targetCharacter == null)
+        {
+            return;
+        }
+
+        Shoot(targetCharacter);
         nextShotTime = Time.time + fireInterval;
     }
 
-    private void Shoot()
+    private void Shoot(PlayerCharacterTemplate targetCharacter)
     {
-        Vector2 direction = GetShootDirection();
+        Vector2 direction = GetShootDirection(targetCharacter);
         Vector2 spawnPosition = (Vector2)transform.position + direction * projectileSpawnOffsetDistance;
         EnemyProjectile projectile = Instantiate(projectilePrefab, spawnPosition, Quaternion.identity);
 
@@ -52,8 +70,18 @@ public class EnemyShooter : EnemyTemplate
         Debug.Log($"{name}: противник выстрелил в направлении {direction}.");
     }
 
-    private Vector2 GetShootDirection()
+    private Vector2 GetShootDirection(PlayerCharacterTemplate targetCharacter)
     {
+        if (targetCharacter != null)
+        {
+            Vector2 directionToTarget = (Vector2)targetCharacter.transform.position - (Vector2)transform.position;
+
+            if (directionToTarget.sqrMagnitude > 0.0001f)
+            {
+                return directionToTarget.normalized;
+            }
+        }
+
         if (shootDirection.sqrMagnitude <= 0.0001f)
         {
             return Vector2.right;
@@ -67,5 +95,7 @@ public class EnemyShooter : EnemyTemplate
         Vector2 direction = shootDirection.sqrMagnitude > 0.0001f ? shootDirection.normalized : Vector2.right;
         Gizmos.color = Color.red;
         Gizmos.DrawLine(transform.position, (Vector2)transform.position + direction * 1.5f);
+        DrawAiMovementGizmos();
+        DrawAiAttackGizmos();
     }
 }

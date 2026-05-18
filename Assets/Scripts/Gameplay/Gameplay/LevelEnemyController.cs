@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(GeneratedLevelRuntime))]
@@ -23,15 +24,18 @@ public sealed class LevelEnemyController : MonoBehaviour
     [SerializeField] private bool spawnOnBuild = true;
     [SerializeField] private bool destroyOldEnemiesOnRebuild = true;
     [SerializeField] private int defaultEnemyScore = 10;
+    [SerializeField, Min(0.05f)] private float enemyNavMeshSpawnSampleRadius = 1.25f;
     [SerializeField] private bool lockUnclearedEnemyRooms = true;
     [SerializeField] private Color roomLockBlockerColor = new Color(0.15f, 0.15f, 0.18f, 0.95f);
     [SerializeField] private bool verboseRoomLockLogs = true;
     [SerializeField] private float repeatedLogIntervalSeconds = 0.75f;
 
-    private readonly Dictionary<string, List<EnemyAgentRuntime>> enemiesByRoomNodeId = new();
+    private readonly Dictionary<string, List<GameObject>> enemiesByRoomNodeId = new();
     private readonly List<GameObject> spawnedEnemies = new();
     private readonly Dictionary<Health, GameObject> enemiesByHealth = new();
     private readonly Dictionary<Health, string> roomNodeIdByHealth = new();
+    private readonly Dictionary<EnemyTemplate, GameObject> enemiesByTemplate = new();
+    private readonly Dictionary<EnemyTemplate, string> roomNodeIdByTemplate = new();
     private readonly HashSet<string> clearedRoomNodeIds = new();
     private readonly List<GameObject> roomLockBlockers = new();
     private PlayerRoomTracker playerRoomTracker;
@@ -48,6 +52,7 @@ public sealed class LevelEnemyController : MonoBehaviour
     private void Update()
     {
         TryRefreshCurrentPlayerRoom();
+        TryCompleteLockedRoomCombat();
     }
 
     private void Awake()
@@ -181,9 +186,9 @@ public sealed class LevelEnemyController : MonoBehaviour
                 var spawnInfo = room.EnemySpawns[j];
                 if (spawnInfo == null || !spawnInfo.Enabled || spawnInfo.EnemyPrefab == null)
                     continue;
-                if (!spawnInfo.EnemyPrefab.TryGetComponent<EnemyAuthoring>(out _))
+                if (!IsSupportedEnemyPrefab(spawnInfo.EnemyPrefab))
                 {
-                    Debug.LogWarning($"[LevelEnemyController] Enemy prefab '{spawnInfo.EnemyPrefab.name}' has no EnemyAuthoring and was skipped.");
+                    Debug.LogWarning($"[LevelEnemyController] Enemy prefab '{spawnInfo.EnemyPrefab.name}' has no supported enemy component and was skipped.");
                     continue;
                 }
 
@@ -200,28 +205,35 @@ public sealed class LevelEnemyController : MonoBehaviour
                     playerController.enabled = false;
                 if (enemyInstance.TryGetComponent<PlayerRoomTracker>(out var roomTracker))
                     roomTracker.enabled = false;
-                if (!enemyInstance.TryGetComponent<EnemyAuthoring>(out var enemyAuthoring))
+                if (!IsSupportedEnemyPrefab(enemyInstance))
                 {
-                    Debug.LogWarning($"[LevelEnemyController] Spawned enemy '{enemyInstance.name}' has no EnemyAuthoring and was destroyed.");
+                    Debug.LogWarning($"[LevelEnemyController] Spawned enemy '{enemyInstance.name}' has no supported enemy component and was destroyed.");
                     Destroy(enemyInstance);
                     spawnedEnemies.RemoveAt(spawnedEnemies.Count - 1);
                     continue;
                 }
 
-                enemyAuthoring.ApplyRuntimeConfiguration(BuildPlayerLayerMask(), GetEnemyStatsMultiplier());
+                if (enemyInstance.TryGetComponent<EnemyAuthoring>(out var enemyAuthoring))
+                    enemyAuthoring.ApplyRuntimeConfiguration(BuildPlayerLayerMask(), GetEnemyStatsMultiplier());
+
+                TryPlaceEnemyOnNavMesh(enemyInstance, spawnInfo.SpawnWorldPosition);
 
                 var agent = enemyInstance.GetComponent<EnemyAgentRuntime>();
-                agent.SetTarget(playerTarget);
-                agent.SetActiveAI(false);
+                if (agent != null)
+                {
+                    agent.SetTarget(playerTarget);
+                    agent.SetActiveAI(false);
+                }
+
                 SubscribeEnemyDeath(enemyInstance, room.NodeId);
 
                 if (!enemiesByRoomNodeId.TryGetValue(room.NodeId, out var list))
                 {
-                    list = new List<EnemyAgentRuntime>();
+                    list = new List<GameObject>();
                     enemiesByRoomNodeId[room.NodeId] = list;
                 }
 
-                list.Add(agent);
+                list.Add(enemyInstance);
             }
         }
 
@@ -251,7 +263,15 @@ public sealed class LevelEnemyController : MonoBehaviour
             {
                 if (enemies[i] == null)
                     continue;
-                enemies[i].SetActiveAI(shouldBeActive);
+
+                if (enemies[i].TryGetComponent<EnemyAgentRuntime>(out var agent))
+                {
+                    agent.SetActiveAI(shouldBeActive);
+                }
+                else if (enemies[i].TryGetComponent<EnemyTemplate>(out _))
+                {
+                    enemies[i].SetActive(shouldBeActive);
+                }
             }
         }
     }
@@ -273,6 +293,13 @@ public sealed class LevelEnemyController : MonoBehaviour
         }
         enemiesByHealth.Clear();
         roomNodeIdByHealth.Clear();
+        foreach (var pair in enemiesByTemplate)
+        {
+            if (pair.Key != null)
+                pair.Key.Died -= HandleEnemyTemplateDied;
+        }
+        enemiesByTemplate.Clear();
+        roomNodeIdByTemplate.Clear();
 
         for (var i = 0; i < spawnedEnemies.Count; i++)
         {
@@ -287,13 +314,25 @@ public sealed class LevelEnemyController : MonoBehaviour
 
     private void SubscribeEnemyDeath(GameObject enemyInstance, string roomNodeId = null)
     {
-        if (enemyInstance == null || !enemyInstance.TryGetComponent<Health>(out var health) || health == null)
+        if (enemyInstance == null)
             return;
 
-        health.Died -= HandleEnemyDied;
-        health.Died += HandleEnemyDied;
-        enemiesByHealth[health] = enemyInstance;
-        roomNodeIdByHealth[health] = roomNodeId ?? string.Empty;
+        if (enemyInstance.TryGetComponent<Health>(out var health) && health != null)
+        {
+            health.Died -= HandleEnemyDied;
+            health.Died += HandleEnemyDied;
+            enemiesByHealth[health] = enemyInstance;
+            roomNodeIdByHealth[health] = roomNodeId ?? string.Empty;
+            return;
+        }
+
+        if (enemyInstance.TryGetComponent<EnemyTemplate>(out var enemyTemplate) && enemyTemplate != null)
+        {
+            enemyTemplate.Died -= HandleEnemyTemplateDied;
+            enemyTemplate.Died += HandleEnemyTemplateDied;
+            enemiesByTemplate[enemyTemplate] = enemyInstance;
+            roomNodeIdByTemplate[enemyTemplate] = roomNodeId ?? string.Empty;
+        }
     }
 
     private void HandleEnemyDied(Health health)
@@ -317,6 +356,51 @@ public sealed class LevelEnemyController : MonoBehaviour
             CompleteRoomCombat(roomNodeId);
     }
 
+    private void HandleEnemyTemplateDied(EnemyTemplate enemyTemplate)
+    {
+        if (enemyTemplate == null)
+            return;
+
+        enemyTemplate.Died -= HandleEnemyTemplateDied;
+        enemiesByTemplate.TryGetValue(enemyTemplate, out var enemyInstance);
+        enemiesByTemplate.Remove(enemyTemplate);
+        roomNodeIdByTemplate.TryGetValue(enemyTemplate, out var roomNodeId);
+        roomNodeIdByTemplate.Remove(enemyTemplate);
+
+        var score = Mathf.Max(0, defaultEnemyScore);
+        if (enemyInstance != null && enemyInstance.TryGetComponent<EnemyScoreValue>(out var scoreValue))
+            score = scoreValue.BaseScore;
+
+        EnemyKilled?.Invoke(enemyInstance, score);
+
+        if (!string.IsNullOrEmpty(roomNodeId) && !HasAliveEnemiesInRoom(roomNodeId))
+            CompleteRoomCombat(roomNodeId);
+    }
+
+    private void TryPlaceEnemyOnNavMesh(GameObject enemyInstance, Vector3 requestedPosition)
+    {
+        if (enemyInstance == null || !enemyInstance.TryGetComponent<NavMeshAgent>(out var navMeshAgent) || navMeshAgent == null)
+            return;
+        if (!navMeshAgent.enabled)
+            return;
+
+        if (NavMesh.SamplePosition(requestedPosition, out var hit, Mathf.Max(0.05f, enemyNavMeshSpawnSampleRadius), NavMesh.AllAreas))
+        {
+            enemyInstance.transform.position = hit.position;
+            navMeshAgent.Warp(hit.position);
+            return;
+        }
+
+        Debug.LogWarning($"[LevelEnemyController] Could not place NavMesh enemy '{enemyInstance.name}' on NavMesh near {requestedPosition}.", enemyInstance);
+    }
+
+    private static bool IsSupportedEnemyPrefab(GameObject enemyPrefab)
+    {
+        return enemyPrefab != null
+            && (enemyPrefab.TryGetComponent<EnemyAuthoring>(out _)
+                || enemyPrefab.TryGetComponent<EnemyTemplate>(out _));
+    }
+
     private void AttachPlayerTracker(PlayerRoomTracker tracker)
     {
         if (playerRoomTracker != null)
@@ -337,9 +421,19 @@ public sealed class LevelEnemyController : MonoBehaviour
             {
                 if (enemies[i] == null)
                     continue;
-                enemies[i].SetTarget(playerTarget);
+
+                if (enemies[i].TryGetComponent<EnemyAgentRuntime>(out var agent))
+                    agent.SetTarget(playerTarget);
             }
         }
+    }
+
+    private void TryCompleteLockedRoomCombat()
+    {
+        if (string.IsNullOrEmpty(lockedRoomNodeId) || HasAliveEnemiesInRoom(lockedRoomNodeId))
+            return;
+
+        CompleteRoomCombat(lockedRoomNodeId);
     }
 
     private void ApplyDamageTargetsToAllEnemies()
@@ -420,11 +514,25 @@ public sealed class LevelEnemyController : MonoBehaviour
         for (var i = 0; i < enemies.Count; i++)
         {
             var enemy = enemies[i];
-            if (enemy != null && enemy.IsAlive)
+            if (IsEnemyAlive(enemy))
                 count++;
         }
 
         return count;
+    }
+
+    private static bool IsEnemyAlive(GameObject enemy)
+    {
+        if (enemy == null)
+            return false;
+        if (enemy.TryGetComponent<EnemyAgentRuntime>(out var enemyAgent))
+            return enemyAgent.IsAlive;
+        if (enemy.TryGetComponent<Health>(out var health))
+            return health.IsAlive;
+        if (enemy.TryGetComponent<EnemyTemplate>(out var enemyTemplate))
+            return enemyTemplate.IsAlive;
+
+        return enemy.activeInHierarchy;
     }
 
     private void TeleportCompanionsToPlayer(GeneratedRoomInfo roomInfo)

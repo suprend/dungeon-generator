@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: 77100314}
   - component: {fileID: 4383644169304646754}
   m_Layer: 0
-  m_Name: New_Mage
+  m_Name: Mage
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -77,6 +77,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   controlState: 0
+  interactKey: 102
+  interactRadius: 1.25
+  interactableLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
   maxHealth: 100
   currentHealth: 100
   attackSpeed: 5
@@ -124,6 +129,10 @@ MonoBehaviour:
   aiMovementZoneHysteresis: 0.35
   aiMovementSmoothing: 10
   aiFollowActiveCharacterStopDistance: 1.1
+  aiNavMeshRepathInterval: 0.15
+  aiNavMeshSampleRadius: 2
+  aiNavMeshAgentRadius: 0.2
+  aiNavMeshRepathTargetMoveDistance: 0.45
   aiApproachZoneGizmoColor: {r: 0.2, g: 0.7, b: 1, a: 0.9}
   aiRetreatZoneGizmoColor: {r: 1, g: 0.35, b: 0.15, a: 0.9}
   firstAbilityCooldownTime: 3

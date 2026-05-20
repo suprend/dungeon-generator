@@ -34,6 +34,8 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private const float IncapacitatedSpriteRotationZ = 90f;
     private const int ShieldVisualTextureSize = 64;
     private const int AbilityCooldownSlotsCount = 3;
+    private const int StaticRigidbodyMovementCastResultsCount = 32;
+    private const float StaticRigidbodyMovementSkinWidth = 0.03f;
 
     private static readonly List<PlayerCharacterTemplate> ActivePlayerCharacters = new List<PlayerCharacterTemplate>();
 
@@ -151,6 +153,8 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private Vector2 smoothedAiMovementInput;
     private Vector2 lastMovementInputDirection = Vector2.right;
     private Vector2 damageKnockbackVelocity;
+    private readonly RaycastHit2D[] staticRigidbodyMovementCastHits =
+        new RaycastHit2D[StaticRigidbodyMovementCastResultsCount];
     private NavMeshAgent aiNavMeshAgent;
     private NavMeshPath aiNavMeshPath;
     private readonly Collider2D[] interactionOverlapResults = new Collider2D[16];
@@ -328,6 +332,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     public void SetExternalAiMovementInput(Vector2 input)
     {
         hasExternalAiFollowTarget = false;
+        hasExternalAiFollowFallbackTarget = false;
         externalAiMovementInput = input.sqrMagnitude > 1f ? input.normalized : input;
 
         if (externalAiMovementInput.sqrMagnitude > 0.0001f)
@@ -356,6 +361,21 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         externalAiMovementInput = Vector2.zero;
 
         SetAiNavMeshActive(IsAiControlled && IsAlive);
+    }
+
+    public void ClearExternalAiFollowTarget()
+    {
+        hasExternalAiFollowTarget = false;
+        hasExternalAiFollowFallbackTarget = false;
+        hasUsableAiNavMeshPath = false;
+        externalAiMovementInput = Vector2.zero;
+
+        if (aiMovementMode == AiMovementMode.FollowActiveCharacter)
+        {
+            aiMovementMode = AiMovementMode.Idle;
+        }
+
+        StopAiNavMeshMovement();
     }
 
     public void TeleportTo(Vector3 worldPosition)
@@ -607,6 +627,12 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
             aiMovementMode = AiMovementMode.Idle;
             return true;
+        }
+
+        if (hasExternalAiFollowTarget)
+        {
+            aiMovementMode = AiMovementMode.FollowActiveCharacter;
+            return false;
         }
 
         if (aiMovementMode == AiMovementMode.FollowActiveCharacter)
@@ -1204,11 +1230,28 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         return null;
     }
 
+    public bool HasAliveEnemyTargetInRange(float searchRadius)
+    {
+        if (searchRadius <= 0f)
+        {
+            return false;
+        }
+
+        return FindClosestAliveEnemyTarget(searchRadius) != null;
+    }
+
     private Component FindClosestAliveEnemyTargetInScene()
+    {
+        return FindClosestAliveEnemyTarget(float.PositiveInfinity);
+    }
+
+    private Component FindClosestAliveEnemyTarget(float searchRadius)
     {
         EnemyTemplate[] enemies = FindObjectsByType<EnemyTemplate>(FindObjectsSortMode.None);
         Component closestEnemy = null;
         float closestSqrDistance = float.PositiveInfinity;
+        bool hasRangeLimit = !float.IsPositiveInfinity(searchRadius);
+        float maxSqrDistance = hasRangeLimit ? searchRadius * searchRadius : float.PositiveInfinity;
 
         for (int i = 0; i < enemies.Length; i++)
         {
@@ -1221,7 +1264,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
             float sqrDistance = ((Vector2)enemy.transform.position - (Vector2)transform.position).sqrMagnitude;
 
-            if (sqrDistance >= closestSqrDistance)
+            if (sqrDistance > maxSqrDistance || sqrDistance >= closestSqrDistance)
             {
                 continue;
             }
@@ -1242,7 +1285,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
             float sqrDistance = ((Vector2)health.transform.position - (Vector2)transform.position).sqrMagnitude;
 
-            if (sqrDistance >= closestSqrDistance)
+            if (sqrDistance > maxSqrDistance || sqrDistance >= closestSqrDistance)
             {
                 continue;
             }
@@ -1277,13 +1320,9 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     /// </summary>
     private void MoveCharacter()
     {
-        Vector2 inputVelocity = Vector2.zero;
-        if (!HasActiveDamageKnockback())
-        {
-            inputVelocity = IsPlayerControlled
-                ? movementInput * MovementSpeed
-                : GetCurrentAiMovementInput() * MovementSpeed;
-        }
+        Vector2 inputVelocity = IsPlayerControlled
+            ? movementInput * MovementSpeed
+            : GetCurrentAiMovementInput() * MovementSpeed;
 
         Vector2 nextPosition = characterRigidbody.position + (inputVelocity + damageKnockbackVelocity) * Time.fixedDeltaTime;
 
@@ -1757,6 +1796,106 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     }
 
     /// <summary>
+    /// Ограничивает шаг ручного перемещения, чтобы персонаж не проходил сквозь статичные Rigidbody2D.
+    /// </summary>
+    protected bool TryGetStaticRigidbodySafeMovementStep(
+        Vector2 currentPosition,
+        Vector2 desiredNextPosition,
+        out Vector2 safeNextPosition)
+    {
+        safeNextPosition = desiredNextPosition;
+        Vector2 movement = desiredNextPosition - currentPosition;
+        float movementDistance = movement.magnitude;
+
+        if (movementDistance <= 0.0001f)
+        {
+            return true;
+        }
+
+        if (characterColliders == null)
+        {
+            CacheCharacterColliders();
+        }
+
+        if (characterColliders == null || characterColliders.Length == 0)
+        {
+            return true;
+        }
+
+        Vector2 movementDirection = movement / movementDistance;
+        float allowedDistance = movementDistance;
+        float castDistance = movementDistance + StaticRigidbodyMovementSkinWidth;
+
+        for (int i = 0; i < characterColliders.Length; i++)
+        {
+            Collider2D characterCollider = characterColliders[i];
+
+            if (!CanUseCharacterColliderForStaticRigidbodyCast(characterCollider, i))
+            {
+                continue;
+            }
+
+            int hitCount = characterCollider.Cast(
+                movementDirection,
+                staticRigidbodyMovementCastHits,
+                castDistance);
+
+            for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)
+            {
+                RaycastHit2D hit = staticRigidbodyMovementCastHits[hitIndex];
+
+                if (!IsStaticRigidbodyMovementBlocker(hit.collider))
+                {
+                    continue;
+                }
+
+                allowedDistance = Mathf.Min(
+                    allowedDistance,
+                    Mathf.Max(0f, hit.distance - StaticRigidbodyMovementSkinWidth));
+            }
+        }
+
+        if (allowedDistance <= 0f)
+        {
+            safeNextPosition = currentPosition;
+            return false;
+        }
+
+        safeNextPosition = currentPosition + movementDirection * allowedDistance;
+        return true;
+    }
+
+    private bool CanUseCharacterColliderForStaticRigidbodyCast(Collider2D characterCollider, int colliderIndex)
+    {
+        if (characterCollider == null || !characterCollider.enabled)
+        {
+            return false;
+        }
+
+        if (savedCharacterColliderTriggerStates != null
+            && colliderIndex >= 0
+            && colliderIndex < savedCharacterColliderTriggerStates.Length)
+        {
+            return !savedCharacterColliderTriggerStates[colliderIndex];
+        }
+
+        return !characterCollider.isTrigger;
+    }
+
+    private bool IsStaticRigidbodyMovementBlocker(Collider2D hitCollider)
+    {
+        if (hitCollider == null || hitCollider.isTrigger || hitCollider.transform.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        Rigidbody2D hitRigidbody = hitCollider.attachedRigidbody;
+        return hitRigidbody != null
+            && !ReferenceEquals(hitRigidbody, characterRigidbody)
+            && hitRigidbody.bodyType == RigidbodyType2D.Static;
+    }
+
+    /// <summary>
     /// Проверяет возможность применить первую способность
     /// </summary>
     private void TryUseFirstAbility()
@@ -1888,6 +2027,11 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
     }
 
+    public void ApplyKnockback(Vector2 knockbackDirection, float knockbackForce)
+    {
+        ApplyDamageKnockback(knockbackDirection, knockbackForce);
+    }
+
     /// <summary>
     /// Запускает отталкивание и короткую красную вспышку после получения урона
     /// </summary>
@@ -1910,7 +2054,14 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         float knockbackForce,
         float forceMultiplier = 1f)
     {
-        if (characterRigidbody == null || knockbackDirection.sqrMagnitude <= 0.0001f)
+        if (characterRigidbody == null)
+        {
+            characterRigidbody = GetComponent<Rigidbody2D>();
+        }
+
+        if (characterRigidbody == null
+            || characterRigidbody.bodyType == RigidbodyType2D.Static
+            || knockbackDirection.sqrMagnitude <= 0.0001f)
         {
             return;
         }

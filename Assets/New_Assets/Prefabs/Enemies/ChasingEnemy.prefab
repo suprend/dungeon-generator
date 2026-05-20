@@ -50,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHealth: 100
   currentHealth: 100
-  damage: 5
+  damage: 4
   speed: 3
   damageResistancePercent: 0
   defenceDownStatusSprite: {fileID: 21300000, guid: e17f0a09d0a83814ebe7356974c54bab, type: 3}
@@ -77,12 +77,12 @@ MonoBehaviour:
   aiAttackZoneGizmoColor: {r: 0, g: 1, b: 0, a: 1}
   meleeAttackRange: 1
   meleeAttackOffsetDistance: 0.75
-  meleeKnockbackForce: 4
+  meleeKnockbackForce: 3.5
   meleeAttackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  aiAttackMinInterval: 0.8
-  aiAttackMaxInterval: 1.6
+  aiAttackMinInterval: 1.25
+  aiAttackMaxInterval: 2
   meleeAttackVisualLifeTime: 0.15
   meleeAttackCircleSegments: 40
   meleeAttackCircleWidth: 0.07
@@ -266,7 +266,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 2
   m_Sprite: {fileID: -985753790, guid: b2123c7ec49701e4f8f4b0f5bd972972, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

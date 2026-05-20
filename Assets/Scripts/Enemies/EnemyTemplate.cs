@@ -21,6 +21,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     private const float TransformKnockbackFallbackDistanceMultiplier = 0.1f;
     private const float MinKnockbackDirectionSqrMagnitude = 0.0001f;
     private const float MinAiMovementSqrMagnitude = 0.0001f;
+    private const float KnockbackSlowdown = 20f;
 
     [Header("Статы противника")]
     [SerializeField, Min(1f)] private float maxHealth = 50f;
@@ -28,6 +29,10 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     [SerializeField, Min(0f)] private float damage = 5f;
     [SerializeField, Min(0f)] private float speed = 2f;
     [SerializeField] private float damageResistancePercent;
+
+    [Header("Реакция на урон")]
+    [SerializeField, Min(0f)] private float damageFlashDuration = 0.1f;
+    [SerializeField] private Color damageFlashColor = Color.red;
 
     [Header("Визуал снижения защиты")]
     [SerializeField] private Sprite defenceDownStatusSprite;
@@ -75,8 +80,10 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     private Coroutine speedSlowCoroutine;
     private Coroutine externalMovementCoroutine;
     private Coroutine stunCoroutine;
+    private Coroutine enemyFlashCoroutine;
     private Coroutine damageResistanceReductionCoroutine;
     private Vector2 smoothedAiMovementInput;
+    private Vector2 knockbackVelocity;
     private float currentSpeed;
     private float activeTemporaryDamageResistanceReductionPercent;
     private AiMovementMode aiMovementMode;
@@ -145,9 +152,22 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
 
     protected void MoveWithAiDistancesToTarget(PlayerCharacterTemplate targetCharacter)
     {
+        if (!TryCacheRigidbody())
+        {
+            ResetAiDistanceMovement();
+            return;
+        }
+
+        if (IsExternalMovementActive)
+        {
+            ResetAiDistanceMovement();
+            return;
+        }
+
         if (!CanUseAiDistanceMovement(targetCharacter))
         {
             ResetAiDistanceMovement();
+            MoveWithVelocity(Vector2.zero);
             return;
         }
 
@@ -156,12 +176,11 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
 
         if (smoothedAiMovementInput.sqrMagnitude <= MinAiMovementSqrMagnitude)
         {
+            MoveWithVelocity(Vector2.zero);
             return;
         }
 
-        Vector2 nextPosition = enemyRigidbody.position
-            + smoothedAiMovementInput * Speed * Time.fixedDeltaTime;
-        enemyRigidbody.MovePosition(nextPosition);
+        MoveWithVelocity(smoothedAiMovementInput * Speed);
     }
 
     protected void ResetAiDistanceMovement()
@@ -329,6 +348,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
 
         bool wasAlive = IsAlive;
         ApplyKnockback(knockbackDirection, knockbackForce, 1f);
+        StartDamageFlash();
 
         float finalDamageAmount = GetDamageAfterResistance(damageAmount);
         currentHealth = Mathf.Max(currentHealth - finalDamageAmount, 0f);
@@ -432,6 +452,13 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
             return;
         }
 
+        if (IsAlive && enemyRigidbody.simulated)
+        {
+            enemyRigidbody.velocity = Vector2.zero;
+            knockbackVelocity = normalizedDirection * finalKnockbackForce;
+            return;
+        }
+
         if (enemyRigidbody.simulated)
         {
             enemyRigidbody.AddForce(normalizedDirection * finalKnockbackForce, ForceMode2D.Impulse);
@@ -441,6 +468,50 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         transform.position += (Vector3)(normalizedDirection
             * finalKnockbackForce
             * TransformKnockbackFallbackDistanceMultiplier);
+    }
+
+    private void MoveWithVelocity(Vector2 movementVelocity)
+    {
+        if (!TryCacheRigidbody() || enemyRigidbody.bodyType == RigidbodyType2D.Static)
+        {
+            return;
+        }
+
+        Vector2 totalVelocity = movementVelocity + knockbackVelocity;
+
+        if (totalVelocity.sqrMagnitude > MinAiMovementSqrMagnitude)
+        {
+            enemyRigidbody.MovePosition(enemyRigidbody.position + totalVelocity * Time.fixedDeltaTime);
+        }
+
+        enemyRigidbody.velocity = Vector2.zero;
+        UpdateKnockbackVelocity();
+    }
+
+    private void MoveToPositionWithKnockback(Vector2 nextPosition)
+    {
+        if (!TryCacheRigidbody() || enemyRigidbody.bodyType == RigidbodyType2D.Static)
+        {
+            return;
+        }
+
+        enemyRigidbody.MovePosition(nextPosition + knockbackVelocity * Time.fixedDeltaTime);
+        enemyRigidbody.velocity = Vector2.zero;
+        UpdateKnockbackVelocity();
+    }
+
+    private void UpdateKnockbackVelocity()
+    {
+        if (knockbackVelocity.sqrMagnitude <= MinKnockbackDirectionSqrMagnitude)
+        {
+            knockbackVelocity = Vector2.zero;
+            return;
+        }
+
+        knockbackVelocity = Vector2.MoveTowards(
+            knockbackVelocity,
+            Vector2.zero,
+            KnockbackSlowdown * Time.fixedDeltaTime);
     }
 
     /// <summary>
@@ -522,7 +593,9 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
             FinishExternalMovement();
         }
 
+        StopCoroutineIfRunning(ref enemyFlashCoroutine);
         ResetAiDistanceMovement();
+        knockbackVelocity = Vector2.zero;
         currentSpeed = 0f;
         isStunned = false;
         isSpeedSlowed = false;
@@ -548,6 +621,59 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
 
         StopCoroutine(coroutine);
         coroutine = null;
+    }
+
+    /// <summary>
+    /// Перезапускает красную вспышку урона если противника ударили несколько раз подряд
+    /// </summary>
+    private void StartDamageFlash()
+    {
+        StartEnemyFlash(damageFlashColor, damageFlashDuration);
+    }
+
+    /// <summary>
+    /// Запускает короткое окрашивание спрайтов противника указанным цветом
+    /// </summary>
+    private void StartEnemyFlash(Color flashColor, float flashDuration)
+    {
+        if (flashDuration <= 0f)
+        {
+            return;
+        }
+
+        if (enemyFlashCoroutine != null)
+        {
+            StopCoroutine(enemyFlashCoroutine);
+        }
+
+        enemyFlashCoroutine = StartCoroutine(EnemyFlashCoroutine(flashColor, flashDuration));
+    }
+
+    /// <summary>
+    /// На мгновение окрашивает спрайты и возвращает исходные цвета
+    /// </summary>
+    private IEnumerator EnemyFlashCoroutine(Color flashColor, float flashDuration)
+    {
+        if (spriteRenderers == null || defaultSpriteColors == null)
+        {
+            CacheSpriteRenderers();
+        }
+
+        if (spriteRenderers != null)
+        {
+            for (int i = 0; i < spriteRenderers.Length; i++)
+            {
+                if (spriteRenderers[i] != null)
+                {
+                    spriteRenderers[i].color = flashColor;
+                }
+            }
+        }
+
+        yield return new WaitForSeconds(flashDuration);
+
+        RestoreEnemyBodyColors();
+        enemyFlashCoroutine = null;
     }
 
     private void RestoreEnemyBodyColors()
@@ -1081,7 +1207,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
                 pullSpeed * Time.fixedDeltaTime
             );
 
-            enemyRigidbody.MovePosition(nextPosition);
+            MoveToPositionWithKnockback(nextPosition);
         }
 
         FinishExternalMovement();
@@ -1103,8 +1229,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
                 break;
             }
 
-            Vector2 nextPosition = enemyRigidbody.position + direction * pushSpeed * Time.fixedDeltaTime;
-            enemyRigidbody.MovePosition(nextPosition);
+            MoveWithVelocity(direction * pushSpeed);
         }
 
         FinishExternalMovement();

@@ -423,8 +423,10 @@ public class PlayerCharacterWarrior : PlayerCharacterTemplate
             return false;
         }
 
-        safeNextPosition = sampledNextPosition;
-        return true;
+        return TryGetStaticRigidbodySafeMovementStep(
+            currentPosition,
+            sampledNextPosition,
+            out safeNextPosition);
     }
 
     /// <summary>

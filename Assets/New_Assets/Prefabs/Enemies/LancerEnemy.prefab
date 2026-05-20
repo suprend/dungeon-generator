@@ -50,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHealth: 100
   currentHealth: 100
-  damage: 5
+  damage: 6
   speed: 3
   damageResistancePercent: 0
   defenceDownStatusSprite: {fileID: 21300000, guid: e17f0a09d0a83814ebe7356974c54bab, type: 3}
@@ -78,12 +78,12 @@ MonoBehaviour:
   lineAttackLength: 3
   lineAttackWidth: 0.5
   lineAttackStartOffsetDistance: 0.5
-  lineAttackKnockbackForce: 5
+  lineAttackKnockbackForce: 4.5
   lineAttackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  aiAttackMinInterval: 1
-  aiAttackMaxInterval: 1.8
+  aiAttackMinInterval: 1.6
+  aiAttackMaxInterval: 2.4
   lineAttackVisualLifeTime: 0.16
   lineAttackVisualWidth: 0.07
   lineAttackVisualColor: {r: 1, g: 0.25, b: 0.08, a: 0.95}
@@ -266,7 +266,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 2
   m_Sprite: {fileID: -785293423, guid: 43fd16c79fdb4a94380bd759be076b5c, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

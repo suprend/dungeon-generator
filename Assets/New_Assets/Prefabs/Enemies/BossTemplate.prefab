@@ -48,11 +48,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d027642fd65a41b2bd5c46e546e707cb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxHealth: 500
-  currentHealth: 500
-  damage: 15
+  maxHealth: 650
+  currentHealth: 650
+  damage: 12
   speed: 2
   damageResistancePercent: 0
+  damageFlashDuration: 0.1
+  damageFlashColor: {r: 1, g: 0, b: 0, a: 1}
   defenceDownStatusSprite: {fileID: 21300000, guid: e17f0a09d0a83814ebe7356974c54bab, type: 3}
   defenceDownStatusOffset: {x: 1, y: 3.51}
   defenceDownStatusScale: 1.2
@@ -82,18 +84,18 @@ MonoBehaviour:
   healthBarFillColor: {r: 0.15, g: 0.95, b: 0.2, a: 0.95}
   healthBarSortingOrderOffset: 20
   bossAttacksCount: 3
-  attackMinInterval: 1.5
-  attackMaxInterval: 3
+  attackMinInterval: 2.2
+  attackMaxInterval: 3.6
   firstAttackIndex: 0
   attackOnlyInsideAttackZone: 1
   spiralProjectilePrefab: {fileID: 100003, guid: c708778385a144348d290b9f776c7513, type: 3}
-  spiralWavesCount: 5
-  spiralProjectilesPerWave: 12
+  spiralWavesCount: 4
+  spiralProjectilesPerWave: 10
   spiralInitialPause: 0.35
-  spiralPauseBetweenWaves: 0.45
+  spiralPauseBetweenWaves: 0.55
   spiralProjectileSpawnOffsetDistance: 0.9
-  spiralProjectileSpeed: 5
-  spiralProjectileKnockbackForce: 3
+  spiralProjectileSpeed: 4.5
+  spiralProjectileKnockbackForce: 2.5
   spiralProjectileLifeTime: 5
   spiralProjectileHitLayers:
     serializedVersion: 2
@@ -101,21 +103,21 @@ MonoBehaviour:
   spiralStartAngle: 0
   spiralAngleStepPerWave: 18
   characterSwitcher: {fileID: 0}
-  chargePrepareDelay: 0.35
-  chargeAcceleration: 18
-  chargeMaxSpeed: 10
-  chargeDuration: 5
-  chargeStunDuration: 2.5
-  chaserAttackDuration: 5
-  chaserMeleeAttackZone: 5
-  chaserMeleeAttackRange: 2
-  chaserMeleeAttackOffsetDistance: 1.5
-  chaserMeleeKnockbackForce: 4
+  chargePrepareDelay: 0.45
+  chargeAcceleration: 14
+  chargeMaxSpeed: 8
+  chargeDuration: 3
+  chargeStunDuration: 2
+  chaserAttackDuration: 4
+  chaserMeleeAttackZone: 4.5
+  chaserMeleeAttackRange: 1.6
+  chaserMeleeAttackOffsetDistance: 1.1
+  chaserMeleeKnockbackForce: 3.5
   chaserMeleeAttackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  chaserMeleeAttackMinInterval: 0.8
-  chaserMeleeAttackMaxInterval: 1.6
+  chaserMeleeAttackMinInterval: 1.1
+  chaserMeleeAttackMaxInterval: 1.8
   chaserMeleeAttackVisualLifeTime: 0.15
   chaserMeleeAttackCircleSegments: 40
   chaserMeleeAttackCircleWidth: 0.07
@@ -226,8 +228,8 @@ CapsuleCollider2D:
   m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
-  m_Offset: {x: 0, y: 0}
-  m_Size: {x: 1.5, y: 1}
+  m_Offset: {x: 0, y: 0.4}
+  m_Size: {x: 2, y: 1.7}
   m_Direction: 1
 --- !u!1 &200000
 GameObject:

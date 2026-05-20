@@ -84,8 +84,8 @@ MonoBehaviour:
     m_Bits: 4294967295
   maxHealth: 100
   currentHealth: 100
-  attackSpeed: 5
-  damage: 10
+  attackSpeed: 1.1
+  damage: 11
   movementSpeed: 5
   damageKnockbackForce: 4
   deathKnockbackForceMultiplier: 2
@@ -135,9 +135,9 @@ MonoBehaviour:
   aiNavMeshRepathTargetMoveDistance: 0.45
   aiApproachZoneGizmoColor: {r: 0.2, g: 0.7, b: 1, a: 0.9}
   aiRetreatZoneGizmoColor: {r: 1, g: 0.35, b: 0.15, a: 0.9}
-  firstAbilityCooldownTime: 3
-  secondAbilityCooldownTime: 5
-  thirdAbilityCooldownTime: 8
+  firstAbilityCooldownTime: 9
+  secondAbilityCooldownTime: 12
+  thirdAbilityCooldownTime: 10
   mageProjectilePrefab: {fileID: 100003, guid: 10f1e0c5382949368d35f4f43adb0243, type: 3}
   projectileSpawnOffsetDistance: 0.75
   projectileSpeed: 8
@@ -148,7 +148,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   aiAttackSearchRadius: 8
-  aiAttackMinInterval: 1
+  aiAttackMinInterval: 1.2
   aiAttackMaxInterval: 2
   aiAttackLayers:
     serializedVersion: 2
@@ -159,7 +159,7 @@ MonoBehaviour:
   firstAbilityMaxBounces: 5
   secondAbilityRadius: 2.25
   secondAbilityDelay: 0.35
-  secondAbilityDamage: 20
+  secondAbilityDamage: 24
   secondAbilityKnockbackForce: 7
   secondAbilityStunDuration: 2
   secondAbilityLifeTime: 0.3
@@ -169,12 +169,12 @@ MonoBehaviour:
   secondAbilityCircleSegments: 56
   secondAbilityCircleWidth: 0.08
   secondAbilityCircleColor: {r: 0.45, g: 0.75, b: 1, a: 0.9}
-  thirdAbilityDamage: 2
+  thirdAbilityDamage: 3
   thirdAbilityProjectileSpeed: 7
   thirdAbilityProjectileRadius: 0.45
-  thirdAbilityKnockbackForce: 4
-  thirdAbilityDamageInterval: 0.1
-  thirdAbilityProjectileLifeTime: 3
+  thirdAbilityKnockbackForce: 2
+  thirdAbilityDamageInterval: 0.25
+  thirdAbilityProjectileLifeTime: 2.5
   thirdAbilityLayers:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -301,7 +301,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 2
   m_Sprite: {fileID: 21300000, guid: 773d14f42edaffd45bd8dc3a89ac331d, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -385,7 +385,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: -1
+  m_SortingOrder: 1
   m_Sprite: {fileID: 21300000, guid: d9a04f9a1ef4002428144bc186f6f0fd, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

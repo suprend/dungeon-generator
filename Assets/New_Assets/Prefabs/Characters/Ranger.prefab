@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: 77100214}
   - component: {fileID: 5465722624858579568}
   m_Layer: 0
-  m_Name: New_Ranger
+  m_Name: Ranger
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -77,10 +77,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   controlState: 0
+  interactKey: 102
+  interactRadius: 1.25
+  interactableLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
   maxHealth: 100
   currentHealth: 100
-  attackSpeed: 5
-  damage: 10
+  attackSpeed: 1.4
+  damage: 16
   movementSpeed: 5
   damageKnockbackForce: 4
   deathKnockbackForceMultiplier: 2
@@ -124,11 +129,15 @@ MonoBehaviour:
   aiMovementZoneHysteresis: 0.35
   aiMovementSmoothing: 10
   aiFollowActiveCharacterStopDistance: 1.1
+  aiNavMeshRepathInterval: 0.15
+  aiNavMeshSampleRadius: 2
+  aiNavMeshAgentRadius: 0.2
+  aiNavMeshRepathTargetMoveDistance: 0.45
   aiApproachZoneGizmoColor: {r: 0.2, g: 0.7, b: 1, a: 0.9}
   aiRetreatZoneGizmoColor: {r: 1, g: 0.35, b: 0.15, a: 0.9}
-  firstAbilityCooldownTime: 3
-  secondAbilityCooldownTime: 5
-  thirdAbilityCooldownTime: 8
+  firstAbilityCooldownTime: 7
+  secondAbilityCooldownTime: 10
+  thirdAbilityCooldownTime: 9
   rangerProjectilePrefab: {fileID: 100003, guid: ddbb09eab6e44da08728244f3a06e54a, type: 3}
   maxChargeValue: 1
   minChargeValue: 0.25
@@ -141,26 +150,26 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   maxChargeFlashDuration: 0.08
-  maxChargeFlashColor: {r: 1, g: 1, b: 1, a: 1}
+  maxChargeFlashColor: {r: 0.9882878, g: 1, b: 0, a: 1}
   aiAttackSearchRadius: 8
-  aiAttackMinInterval: 1
+  aiAttackMinInterval: 1.2
   aiAttackMaxInterval: 2
   aiAttackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  firstAbilityDamage: 20
+  firstAbilityDamage: 24
   firstAbilityProjectileSpeed: 12
   firstAbilityProjectileLifeTime: 3
-  firstAbilityDamageResistanceReductionPercent: 50
-  firstAbilityDamageResistanceReductionDuration: 5
-  secondAbilityDamage: 8
+  firstAbilityDamageResistanceReductionPercent: 35
+  firstAbilityDamageResistanceReductionDuration: 4
+  secondAbilityDamage: 7
   secondAbilityProjectileSpeed: 10
   secondAbilityKnockbackForce: 6
   secondAbilityProjectileLifeTime: 3
   secondAbilitySpreadAngle: 45
   thirdAbilityDashDistance: 4
   thirdAbilityDashDuration: 0.25
-  thirdAbilitySpeedBonusMultiplier: 1.35
+  thirdAbilitySpeedBonusMultiplier: 1.3
   thirdAbilitySpeedBonusDuration: 2
 --- !u!114 &77100214
 MonoBehaviour:
@@ -284,7 +293,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 2
   m_Sprite: {fileID: 21300000, guid: 5fa5c605a37bfb141b36fab8bad6d9f5, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -368,7 +377,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: -1
+  m_SortingOrder: 1
   m_Sprite: {fileID: 21300000, guid: d9a04f9a1ef4002428144bc186f6f0fd, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

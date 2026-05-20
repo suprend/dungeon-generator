@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: 77100114}
   - component: {fileID: 7890298497001638552}
   m_Layer: 0
-  m_Name: New_Warrior
+  m_Name: Warrior
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -77,10 +77,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   controlState: 0
+  interactKey: 102
+  interactRadius: 1.25
+  interactableLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
   maxHealth: 100
   currentHealth: 100
-  attackSpeed: 5
-  damage: 10
+  attackSpeed: 1.15
+  damage: 14
   movementSpeed: 5
   damageKnockbackForce: 4
   deathKnockbackForceMultiplier: 2
@@ -124,11 +129,15 @@ MonoBehaviour:
   aiMovementZoneHysteresis: 0.35
   aiMovementSmoothing: 10
   aiFollowActiveCharacterStopDistance: 1.1
+  aiNavMeshRepathInterval: 0.15
+  aiNavMeshSampleRadius: 2
+  aiNavMeshAgentRadius: 0.2
+  aiNavMeshRepathTargetMoveDistance: 0.45
   aiApproachZoneGizmoColor: {r: 0.2, g: 0.7, b: 1, a: 0.9}
   aiRetreatZoneGizmoColor: {r: 1, g: 0.35, b: 0.15, a: 0.9}
-  firstAbilityCooldownTime: 3
-  secondAbilityCooldownTime: 5
-  thirdAbilityCooldownTime: 8
+  firstAbilityCooldownTime: 8
+  secondAbilityCooldownTime: 12
+  thirdAbilityCooldownTime: 10
   meleeAttackRange: 1
   meleeAttackOffsetDistance: 0.75
   meleeKnockbackForce: 4
@@ -136,7 +145,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   aiAttackSearchRadius: 2
-  aiAttackMinInterval: 0.8
+  aiAttackMinInterval: 1
   aiAttackMaxInterval: 1.6
   aiAttackLayers:
     serializedVersion: 2
@@ -164,13 +173,14 @@ MonoBehaviour:
   secondAbilityRadius: 2
   secondAbilityPushSpeed: 6
   secondAbilityPushDuration: 0.2
-  secondAbilityDamageResistanceDuration: 3
+  secondAbilityDamageResistanceDuration: 3.5
   secondAbilityLayers:
     serializedVersion: 2
     m_Bits: 4294967295
   thirdAbilityDashDistance: 4
   thirdAbilityDashDuration: 0.25
   thirdAbilityHitRadius: 0.65
+  thirdAbilityDashNavMeshSampleRadius: 0.35
   thirdAbilitySidePushSpeed: 5
   thirdAbilitySidePushDuration: 0.15
   thirdAbilityLayers:
@@ -298,7 +308,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 2
   m_Sprite: {fileID: 21300000, guid: ee07c00742677984dbdd43c915b76a5e, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -382,7 +392,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: -1
+  m_SortingOrder: 1
   m_Sprite: {fileID: 21300000, guid: d9a04f9a1ef4002428144bc186f6f0fd, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

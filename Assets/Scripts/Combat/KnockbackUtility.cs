@@ -27,6 +27,19 @@ public static class KnockbackUtility
         }
 
         Vector2 knockbackDirection = GetNormalizedDirection(direction, Vector2.right);
+
+        if (target is EnemyTemplate enemy)
+        {
+            enemy.ApplyKnockback(knockbackDirection, force);
+            return;
+        }
+
+        if (target is PlayerCharacterTemplate playerCharacter)
+        {
+            playerCharacter.ApplyKnockback(knockbackDirection, force);
+            return;
+        }
+
         Rigidbody2D targetRigidbody = targetComponent.GetComponentInParent<Rigidbody2D>();
 
         if (targetRigidbody != null && targetRigidbody.bodyType == RigidbodyType2D.Static)

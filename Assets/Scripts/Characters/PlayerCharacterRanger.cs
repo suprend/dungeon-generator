@@ -421,6 +421,14 @@ public class PlayerCharacterRanger : PlayerCharacterTemplate
                 dashSpeed * Time.fixedDeltaTime
             );
 
+            if (!TryGetStaticRigidbodySafeMovementStep(
+                CharacterRigidbody.position,
+                nextPosition,
+                out nextPosition))
+            {
+                break;
+            }
+
             CharacterRigidbody.MovePosition(nextPosition);
         }
 

@@ -18,6 +18,7 @@ public class PlayerCharacterSwitcher : MonoBehaviour
     [SerializeField, Min(0f)] private float companionTrailSpacing = 1.1f;
     [SerializeField, Min(0.01f)] private float trailPointSpacing = 0.25f;
     [SerializeField, Min(0f)] private float companionFollowStopDistance = 0.15f;
+    [SerializeField, Min(0f)] private float companionEnemyProximityRadius = 8f;
     [SerializeField, Min(0.05f)] private float companionTeleportSeparation = 0.8f;
     [SerializeField, Min(0.5f)] private float companionTeleportSearchRadius = 3f;
     [SerializeField, Min(0.05f)] private float companionTeleportNavMeshSampleRadius = 0.45f;
@@ -541,12 +542,24 @@ public class PlayerCharacterSwitcher : MonoBehaviour
 
         UpdateActiveTrail(activeCharacter);
 
+        bool forceFollowActiveCharacter = Input.GetKey(KeyCode.Space);
+        bool activeCharacterHasNearbyEnemy = activeCharacter.HasAliveEnemyTargetInRange(companionEnemyProximityRadius);
+
         for (int step = 1; step < characters.Count; step++)
         {
             int characterIndex = GetWrappedCharacterIndex(currentCharacterIndex + step);
             PlayerCharacterTemplate character = characters[characterIndex];
             if (character == null || character == activeCharacter || !character.IsAlive)
             {
+                continue;
+            }
+
+            if (!ShouldCompanionFollowActiveCharacter(
+                activeCharacterHasNearbyEnemy,
+                character,
+                forceFollowActiveCharacter))
+            {
+                character.ClearExternalAiFollowTarget();
                 continue;
             }
 
@@ -560,6 +573,20 @@ public class PlayerCharacterSwitcher : MonoBehaviour
                 companionFollowStopDistance,
                 Mathf.Max(companionTrailSpacing * 0.75f, companionFollowStopDistance));
         }
+    }
+
+    private bool ShouldCompanionFollowActiveCharacter(
+        bool activeCharacterHasNearbyEnemy,
+        PlayerCharacterTemplate companion,
+        bool forceFollowActiveCharacter)
+    {
+        if (forceFollowActiveCharacter)
+        {
+            return true;
+        }
+
+        return !activeCharacterHasNearbyEnemy
+            && !companion.HasAliveEnemyTargetInRange(companionEnemyProximityRadius);
     }
 
     private void CacheRuntimeReferences()

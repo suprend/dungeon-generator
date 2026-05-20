@@ -268,10 +268,7 @@ public sealed class PlayerDeathRestartMenu : MonoBehaviour
 
     private static TMP_FontAsset GetButtonFont()
     {
-        if (TMP_Settings.defaultFontAsset != null)
-            return TMP_Settings.defaultFontAsset;
-
-        return Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+        return GameTextFontProvider.TmpFont;
     }
 
     private static Button CreateButton(Transform parent, string text, UnityEngine.Events.UnityAction onClick)

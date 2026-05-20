@@ -20,6 +20,9 @@ public class MainMenuStartButton : MonoBehaviour
     [Header("Кнопка")]
     [SerializeField] private string buttonText = "Старт";
     [SerializeField] private Vector2 buttonSize = new Vector2(240f, 80f);
+    [SerializeField] private string exitButtonText = "Выход";
+    [SerializeField] private Vector2 exitButtonSize = new Vector2(240f, 60f);
+    [SerializeField, Min(0f)] private float exitButtonSpacing = 16f;
 
     [Header("Плашка управления")]
     [SerializeField, TextArea(2, 4)] private string controlsDescription =
@@ -44,9 +47,22 @@ public class MainMenuStartButton : MonoBehaviour
     /// </summary>
     private void OnGUI()
     {
+        Font previousFont = GUI.skin.font;
+        Font menuFont = GameTextFontProvider.LegacyFont;
+        if (menuFont != null)
+        {
+            GUI.skin.font = menuFont;
+        }
+
         DrawControlsDescription();
         DrawHeroDescriptions();
         DrawStartButton();
+        DrawExitButton();
+
+        if (menuFont != null)
+        {
+            GUI.skin.font = previousFont;
+        }
     }
 
     /// <summary>
@@ -65,6 +81,26 @@ public class MainMenuStartButton : MonoBehaviour
         if (GUI.Button(buttonRect, buttonText))
         {
             LoadTargetScene();
+        }
+    }
+
+    private void DrawExitButton()
+    {
+        float startButtonHeight = Mathf.Max(1f, buttonSize.y);
+        float buttonWidth = Mathf.Max(1f, exitButtonSize.x);
+        float buttonHeight = Mathf.Max(1f, exitButtonSize.y);
+        float spacing = Mathf.Max(0f, exitButtonSpacing);
+        float buttonY = (Screen.height - startButtonHeight) * 0.5f + startButtonHeight + spacing;
+
+        Rect buttonRect = new Rect(
+            (Screen.width - buttonWidth) * 0.5f,
+            Mathf.Min(buttonY, Screen.height - buttonHeight - 10f),
+            buttonWidth,
+            buttonHeight);
+
+        if (GUI.Button(buttonRect, exitButtonText))
+        {
+            ExitGame();
         }
     }
 
@@ -141,6 +177,15 @@ public class MainMenuStartButton : MonoBehaviour
         }
 
         SceneManager.LoadScene(targetSceneName);
+    }
+
+    public void ExitGame()
+    {
+#if UNITY_EDITOR
+        EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
 #if UNITY_EDITOR

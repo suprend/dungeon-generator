@@ -185,9 +185,6 @@ public sealed class PlayerAbilityCooldownHud : MonoBehaviour
 
     private static TMP_FontAsset GetHudFont()
     {
-        if (TMP_Settings.defaultFontAsset != null)
-            return TMP_Settings.defaultFontAsset;
-
-        return Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+        return GameTextFontProvider.TmpFont;
     }
 }

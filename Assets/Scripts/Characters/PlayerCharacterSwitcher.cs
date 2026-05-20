@@ -902,6 +902,12 @@ public class PlayerCharacterSwitcher : MonoBehaviour
         resurrectionPromptTextMesh.richText = false;
 
         resurrectionPromptRenderer = promptObject.GetComponent<MeshRenderer>();
+        Font promptFont = GameTextFontProvider.LegacyFont;
+        if (promptFont != null)
+        {
+            resurrectionPromptTextMesh.font = promptFont;
+            resurrectionPromptRenderer.sharedMaterial = promptFont.material;
+        }
     }
 
     /// <summary>

@@ -111,6 +111,9 @@ public class GraphMapBuilder : MonoBehaviour
             return;
         }
 
+        if (clearOnRun)
+            ClearGeneratedRuntimeObjects();
+
         var solver = new MapGraphLevelSolver(graph);
         Vector3Int? startCell = targetGrid.WorldToCell(transform.position);
         var settings = new MapGraphLayoutGenerator.Settings
@@ -165,5 +168,39 @@ public class GraphMapBuilder : MonoBehaviour
 
         LastGeneratedRooms = solver.LastGeneratedRooms ?? Array.Empty<GeneratedRoomInfo>();
         GeneratedRoomsChanged?.Invoke();
+    }
+
+    private void ClearGeneratedRuntimeObjects()
+    {
+        var runtimeObjects = FindObjectsOfType<LevelRuntimeObject>(true);
+        var runtime = GetComponent<GeneratedLevelRuntime>();
+        var spawnedPlayer = runtime != null ? runtime.SpawnedPlayerInstance : null;
+        var expectedParent = targetGrid != null ? targetGrid.transform : transform;
+
+        for (var i = 0; i < runtimeObjects.Length; i++)
+        {
+            var runtimeObject = runtimeObjects[i];
+            if (runtimeObject == null || runtimeObject.transform == null)
+                continue;
+
+            if (spawnedPlayer != null && runtimeObject.transform.IsChildOf(spawnedPlayer.transform))
+                continue;
+
+            if (expectedParent != null && !runtimeObject.transform.IsChildOf(expectedParent))
+                continue;
+
+            DestroyRuntimeObject(runtimeObject.gameObject);
+        }
+    }
+
+    private static void DestroyRuntimeObject(GameObject runtimeObject)
+    {
+        if (runtimeObject == null)
+            return;
+
+        if (Application.isPlaying)
+            Destroy(runtimeObject);
+        else
+            DestroyImmediate(runtimeObject);
     }
 }

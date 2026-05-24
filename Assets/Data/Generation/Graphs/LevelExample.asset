@@ -17,37 +17,62 @@ MonoBehaviour:
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 452.3386, y: 190}
+    position: {x: 651.5, y: 50.00001}
   - id: 43d5fef0e8f44a1799d90741f497f800
     label: Start
     roomType: {fileID: 11400000, guid: 7e937d4a6b5304abb9dbd36e459eff54, type: 2}
     notes: 
-    position: {x: 489.91736, y: 42.834724}
+    position: {x: 488.5, y: 49.00001}
   - id: 1d21837d4c45421ba028548180c26977
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 712.87006, y: 46.499928}
+    position: {x: 469.1027, y: 185.30135}
   - id: 17294c98009941e78dab259299814f59
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 483.57297, y: -69.94394}
+    position: {x: 296.07913, y: 50.10775}
   - id: 57d825e9a3ab483d9425e9a04462d54f
-    label: Shop
+    label: Heal
     roomType: {fileID: 11400000, guid: 8f1b74222788e44968d734ee41e9d2c6, type: 2}
     notes: 
-    position: {x: 692.4001, y: 179.6}
+    position: {x: 369.5, y: 362.14}
   - id: 5a457bbae7cc4adaa0e55f76f628ce51
     label: BaseRoom
     roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
     notes: 
-    position: {x: 485.08676, y: -171.05913}
+    position: {x: 294.9394, y: -83.888916}
   - id: 8a83f1ab5d7f4544a6f28ca42647d64e
-    label: boss
+    label: BOSS
     roomType: {fileID: 11400000, guid: 7161bdcbeb6e64dd39a248cd37d5db91, type: 2}
     notes: 
-    position: {x: 659.2263, y: -220.37003}
+    position: {x: 313.67844, y: -196.74747}
+  - id: deecff884bd04cabbc2f14468d742878
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 655.2812, y: -82.94111}
+  - id: 0d11dee7daad47678b4b33bd0389d260
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 127.404045, y: -82.90743}
+  - id: f5bbde791cb347a7a0cd30f3f0bafee2
+    label: Heal
+    roomType: {fileID: 11400000, guid: 8f1b74222788e44968d734ee41e9d2c6, type: 2}
+    notes: 
+    position: {x: 760.126, y: -194.69768}
+  - id: 0f5dac7126d64cc89e662e0ba9d5d119
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 863.9534, y: -68.27908}
+  - id: f2518b78de544b348f1450170728fee6
+    label: BaseRoom
+    roomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
+    notes: 
+    position: {x: 912, y: -194}
   edges:
   - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
     toNodeId: 17294c98009941e78dab259299814f59
@@ -64,8 +89,26 @@ MonoBehaviour:
   - fromNodeId: 43d5fef0e8f44a1799d90741f497f800
     toNodeId: a4eae09f5d474e819ff8ba25c6c49887
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
-  - fromNodeId: a4eae09f5d474e819ff8ba25c6c49887
-    toNodeId: 57d825e9a3ab483d9425e9a04462d54f
+  - fromNodeId: 57d825e9a3ab483d9425e9a04462d54f
+    toNodeId: 1d21837d4c45421ba028548180c26977
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: deecff884bd04cabbc2f14468d742878
+    toNodeId: a4eae09f5d474e819ff8ba25c6c49887
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: 0d11dee7daad47678b4b33bd0389d260
+    toNodeId: 5a457bbae7cc4adaa0e55f76f628ce51
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: deecff884bd04cabbc2f14468d742878
+    toNodeId: f5bbde791cb347a7a0cd30f3f0bafee2
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: deecff884bd04cabbc2f14468d742878
+    toNodeId: 0f5dac7126d64cc89e662e0ba9d5d119
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: f2518b78de544b348f1450170728fee6
+    toNodeId: 0f5dac7126d64cc89e662e0ba9d5d119
+    connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
+  - fromNodeId: f5bbde791cb347a7a0cd30f3f0bafee2
+    toNodeId: f2518b78de544b348f1450170728fee6
     connectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}
   defaultRoomType: {fileID: 11400000, guid: ddf0eefb9c1fe4f309c45955bf5f0ae4, type: 2}
   defaultConnectionType: {fileID: 11400000, guid: f9a45850e5f5b4308990e5271540cda7, type: 2}

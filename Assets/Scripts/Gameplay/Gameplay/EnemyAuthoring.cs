@@ -74,6 +74,7 @@ public sealed class EnemyAuthoring : MonoBehaviour
             body2D.gravityScale = 0f;
             body2D.bodyType = RigidbodyType2D.Kinematic;
             body2D.constraints |= RigidbodyConstraints2D.FreezeRotation;
+            Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
         }
 
         if (TryGetComponent<NavMeshAgent>(out var navMeshAgent))

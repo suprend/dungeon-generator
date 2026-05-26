@@ -41,6 +41,8 @@ public class PlayerCharacterPriest : PlayerCharacterTemplate
     [SerializeField, Min(8)] private int areaAttackCircleSegments = 48;
     [SerializeField, Min(0.01f)] private float areaAttackCircleWidth = 0.06f;
     [SerializeField] private Color areaAttackCircleColor = new Color(1f, 0.88f, 0.2f, 0.9f);
+    [SerializeField, Range(0f, 1f)] private float areaAttackCirclePreviewAlpha = 0.18f;
+    [SerializeField, Range(0f, 1f)] private float areaAttackCircleFillAlpha = 0.35f;
 
     [Header("Отображение третьей способности")]
     [SerializeField, Min(0.01f)] private float thirdAbilityAttackVisualLifeTime = 0.15f;
@@ -128,12 +130,14 @@ public class PlayerCharacterPriest : PlayerCharacterTemplate
     /// </summary>
     private IEnumerator UseAreaAttackAfterDelay(Vector2 attackPosition)
     {
+        GameObject attackCircle = CreateAttackCircle(attackPosition);
+
         if (areaAttackDelay > 0f)
         {
             yield return new WaitForSeconds(areaAttackDelay);
         }
 
-        GameObject attackCircle = CreateAttackCircle(attackPosition);
+        ShowAreaAttackImpactCircle(attackCircle);
         int damagedTargetsCount = DamageTargetsInArea(attackPosition);
 
         Debug.Log($"{name} атака жреца нанесла {Damage} урона. Задето{damagedTargetsCount} целей");
@@ -168,13 +172,24 @@ public class PlayerCharacterPriest : PlayerCharacterTemplate
     /// </summary>
     private GameObject CreateAttackCircle(Vector2 attackPosition)
     {
-        return CreateCircleVisual(
+        Color previewColor = GetColorWithAlpha(areaAttackCircleColor, areaAttackCirclePreviewAlpha);
+
+        return CreateFilledCircleWithOutlineVisual(
             "PriestAreaAttackCircle",
             attackPosition,
             areaAttackRadius,
             areaAttackCircleSegments,
             areaAttackCircleWidth,
-            areaAttackCircleColor);
+            previewColor,
+            previewColor);
+    }
+
+    private void ShowAreaAttackImpactCircle(GameObject attackCircle)
+    {
+        SetFilledCircleWithOutlineVisualColors(
+            attackCircle,
+            areaAttackCircleColor,
+            GetColorWithAlpha(areaAttackCircleColor, areaAttackCircleFillAlpha));
     }
 
     /// <summary>

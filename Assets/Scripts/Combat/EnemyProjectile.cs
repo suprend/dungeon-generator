@@ -23,6 +23,7 @@ public class EnemyProjectile : MonoBehaviour
     private void Awake()
     {
         projectileRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(projectileRigidbody);
 
         // Снаряд двигается только в плоскости 2D, поэтому гравитация и вращение ему не нужны.
         projectileRigidbody.gravityScale = 0f;

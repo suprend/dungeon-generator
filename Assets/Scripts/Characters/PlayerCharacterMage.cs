@@ -41,6 +41,8 @@ public class PlayerCharacterMage : PlayerCharacterTemplate
     [SerializeField, Min(8)] private int secondAbilityCircleSegments = 56;
     [SerializeField, Min(0.01f)] private float secondAbilityCircleWidth = 0.08f;
     [SerializeField] private Color secondAbilityCircleColor = new Color(0.45f, 0.75f, 1f, 0.9f);
+    [SerializeField, Range(0f, 1f)] private float secondAbilityCirclePreviewAlpha = 0.18f;
+    [SerializeField, Range(0f, 1f)] private float secondAbilityCircleFillAlpha = 0.35f;
 
     [Header("Третья способность")]
     [SerializeField, Min(0f)] private float thirdAbilityDamage = 2f;
@@ -229,12 +231,14 @@ public class PlayerCharacterMage : PlayerCharacterTemplate
     /// </summary>
     private IEnumerator UseSecondAbilityAfterDelay(Vector2 attackPosition)
     {
+        GameObject attackCircle = CreateSecondAbilityCircle(attackPosition);
+
         if (secondAbilityDelay > 0f)
         {
             yield return new WaitForSeconds(secondAbilityDelay);
         }
 
-        GameObject attackCircle = CreateSecondAbilityCircle(attackPosition);
+        ShowSecondAbilityImpactCircle(attackCircle);
         int affectedEnemiesCount = DamageAndStunEnemiesInSecondAbility(attackPosition);
 
         Debug.Log(
@@ -278,13 +282,24 @@ public class PlayerCharacterMage : PlayerCharacterTemplate
     /// </summary>
     private GameObject CreateSecondAbilityCircle(Vector2 attackPosition)
     {
-        return CreateCircleVisual(
+        Color previewColor = GetColorWithAlpha(secondAbilityCircleColor, secondAbilityCirclePreviewAlpha);
+
+        return CreateFilledCircleWithOutlineVisual(
             "MageSecondAbilityCircle",
             attackPosition,
             secondAbilityRadius,
             secondAbilityCircleSegments,
             secondAbilityCircleWidth,
-            secondAbilityCircleColor);
+            previewColor,
+            previewColor);
+    }
+
+    private void ShowSecondAbilityImpactCircle(GameObject attackCircle)
+    {
+        SetFilledCircleWithOutlineVisualColors(
+            attackCircle,
+            secondAbilityCircleColor,
+            GetColorWithAlpha(secondAbilityCircleColor, secondAbilityCircleFillAlpha));
     }
 
     private void OnDrawGizmosSelected()

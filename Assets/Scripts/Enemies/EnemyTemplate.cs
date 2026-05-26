@@ -104,6 +104,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
     private void Awake()
     {
         enemyRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(enemyRigidbody);
         enemyRigidbody.gravityScale = 0f;
         enemyRigidbody.freezeRotation = true;
 
@@ -1194,6 +1195,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
             if (enemyRigidbody == null)
             {
                 enemyRigidbody = GetComponent<Rigidbody2D>();
+                Rigidbody2DSmoothingUtility.EnableInterpolation(enemyRigidbody);
             }
 
             if (enemyRigidbody == null)
@@ -1267,6 +1269,7 @@ public class EnemyTemplate : MonoBehaviour, IDamageable
         if (enemyRigidbody == null)
         {
             enemyRigidbody = GetComponent<Rigidbody2D>();
+            Rigidbody2DSmoothingUtility.EnableInterpolation(enemyRigidbody);
         }
 
         return enemyRigidbody != null;

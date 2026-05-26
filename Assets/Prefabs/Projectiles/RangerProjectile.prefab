@@ -58,7 +58,7 @@ Rigidbody2D:
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
-  m_Interpolate: 0
+  m_Interpolate: 1
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 4
@@ -78,6 +78,7 @@ MonoBehaviour:
   speed: 10
   knockbackForce: 6
   damageResistanceReductionPercent: 0
+  damageResistanceReductionDuration: 0
   lifeTime: 3
   hitLayers:
     serializedVersion: 2
@@ -90,7 +91,6 @@ BoxCollider2D:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 100000}
   m_Enabled: 1
-  serializedVersion: 3
   m_Density: 1
   m_Material: {fileID: 0}
   m_IncludeLayers:
@@ -114,8 +114,7 @@ BoxCollider2D:
     m_Bits: 4294967295
   m_IsTrigger: 1
   m_UsedByEffector: 0
-  m_CompositeOperation: 0
-  m_CompositeOrder: 0
+  m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
@@ -126,6 +125,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
+  serializedVersion: 2
   m_Size: {x: 0.35, y: 0.16}
   m_EdgeRadius: 0
 --- !u!1 &200000
@@ -202,7 +202,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 1
   m_Sprite: {fileID: 21300000, guid: 01127fc6f5bb40f1aff95faa3152181a, type: 3}
-  m_Color: {r: 0.15, g: 0.9, b: 0.25, a: 1}
+  m_Color: {r: 0.6556604, g: 1, b: 0.70228976, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0

@@ -145,7 +145,7 @@ public sealed class ArrowProjectile : MonoBehaviour
             body2D.gravityScale = 0f;
             body2D.bodyType = RigidbodyType2D.Kinematic;
             body2D.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-            body2D.interpolation = RigidbodyInterpolation2D.Interpolate;
+            Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
         }
 
         if (hitCollider != null)

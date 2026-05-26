@@ -39,6 +39,7 @@ public class MageProjectile : MonoBehaviour
     private void Awake()
     {
         projectileRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(projectileRigidbody);
         spriteRenderers = GetComponentsInChildren<SpriteRenderer>();
 
         projectileRigidbody.gravityScale = 0f;
@@ -185,6 +186,11 @@ public class MageProjectile : MonoBehaviour
             return;
         }
 
+        if (!CanRegularProjectileExplodeOnCollider(other))
+        {
+            return;
+        }
+
         Explode();
     }
 
@@ -195,6 +201,22 @@ public class MageProjectile : MonoBehaviour
     {
         IDamageable damageable = other.GetComponentInParent<IDamageable>();
         return damageable != null && (ReferenceEquals(damageable, owner) || damageable is PlayerCharacterTemplate);
+    }
+
+    private bool CanRegularProjectileExplodeOnCollider(Collider2D other)
+    {
+        if (!IsLayerAllowed(other.gameObject.layer))
+        {
+            return false;
+        }
+
+        IDamageable target = other.GetComponentInParent<IDamageable>();
+        if (target != null)
+        {
+            return PlayerCharacterTemplate.CanPlayerAttackDamageTarget(target);
+        }
+
+        return !other.isTrigger;
     }
 
     /// <summary>

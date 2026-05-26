@@ -283,6 +283,7 @@ public sealed class PartyMemberRuntime : MonoBehaviour
             health = GetComponent<Health>();
         if (body2D == null)
             body2D = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
         if (playerRoomTracker == null)
             playerRoomTracker = GetComponent<PlayerRoomTracker>();
         if (navMeshAgent == null)

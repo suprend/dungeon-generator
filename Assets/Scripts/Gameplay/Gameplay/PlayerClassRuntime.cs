@@ -388,6 +388,7 @@ public sealed class PlayerClassRuntime : MonoBehaviour
             playerController = GetComponent<TopDownPlayerController>();
         if (body2D == null)
             body2D = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
         if (health == null)
             health = GetComponent<Health>();
         if (bowAttack == null)

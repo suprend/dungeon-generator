@@ -34,7 +34,10 @@ public sealed class TopDownPlayerController : MonoBehaviour
     {
         body2D = GetComponent<Rigidbody2D>();
         if (body2D != null)
+        {
+            Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
             body2D.gravityScale = 0f;
+        }
     }
 
     private void Update()

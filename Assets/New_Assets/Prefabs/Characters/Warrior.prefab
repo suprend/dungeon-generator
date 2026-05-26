@@ -60,7 +60,7 @@ Rigidbody2D:
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
-  m_Interpolate: 0
+  m_Interpolate: 1
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 4
@@ -140,7 +140,7 @@ MonoBehaviour:
   thirdAbilityCooldownTime: 10
   meleeAttackRange: 1
   meleeAttackOffsetDistance: 0.75
-  meleeKnockbackForce: 4
+  meleeKnockbackForce: 6
   meleeAttackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -180,7 +180,6 @@ MonoBehaviour:
   thirdAbilityDashDistance: 4
   thirdAbilityDashDuration: 0.25
   thirdAbilityHitRadius: 0.65
-  thirdAbilityDashNavMeshSampleRadius: 0.35
   thirdAbilitySidePushSpeed: 5
   thirdAbilitySidePushDuration: 0.15
   thirdAbilityLayers:

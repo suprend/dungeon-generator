@@ -33,6 +33,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     private const float MinAiMovementSqrMagnitude = 0.0001f;
     private const float IncapacitatedSpriteRotationZ = 90f;
     private const int ShieldVisualTextureSize = 64;
+    private const int FilledCircleVisualTextureSize = 64;
     private const int AbilityCooldownSlotsCount = 3;
     private const int StaticRigidbodyMovementCastResultsCount = 32;
     private const float StaticRigidbodyMovementSkinWidth = 0.03f;
@@ -127,6 +128,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     [SerializeField, Min(0f)] private float thirdAbilityCooldownTime = 8f;
 
     private static Sprite shieldVisualSprite;
+    private static Sprite filledCircleVisualSprite;
     private static Sprite healthBarSprite;
 
     private Rigidbody2D characterRigidbody;
@@ -228,6 +230,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     protected virtual void Awake()
     {
         characterRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(characterRigidbody);
 
         characterRigidbody.gravityScale = 0f;
         characterRigidbody.freezeRotation = true;
@@ -383,6 +386,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         if (characterRigidbody == null)
         {
             characterRigidbody = GetComponent<Rigidbody2D>();
+            Rigidbody2DSmoothingUtility.EnableInterpolation(characterRigidbody);
         }
 
         damageKnockbackVelocity = Vector2.zero;
@@ -1717,6 +1721,106 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
     }
 
     /// <summary>
+    /// Создает залитый круг с обводкой для предупреждения об ударе по области.
+    /// </summary>
+    protected GameObject CreateFilledCircleWithOutlineVisual(
+        string circleName,
+        Vector2 circleCenter,
+        float circleRadius,
+        int circleSegments,
+        float circleWidth,
+        Color outlineColor,
+        Color fillColor,
+        int sortingOrder = 10)
+    {
+        GameObject circleObject = new GameObject(circleName);
+        circleObject.transform.position = circleCenter;
+
+        GameObject fillObject = CreateFilledCircleVisual(
+            $"{circleName}Fill",
+            circleCenter,
+            circleRadius,
+            fillColor,
+            sortingOrder - 1);
+
+        GameObject outlineObject = CreateCircleVisual(
+            $"{circleName}Outline",
+            circleCenter,
+            circleRadius,
+            circleSegments,
+            circleWidth,
+            outlineColor,
+            sortingOrder);
+
+        fillObject.transform.SetParent(circleObject.transform, true);
+        outlineObject.transform.SetParent(circleObject.transform, true);
+
+        return circleObject;
+    }
+
+    protected GameObject CreateFilledCircleVisual(
+        string circleName,
+        Vector2 circleCenter,
+        float circleRadius,
+        Color circleColor,
+        int sortingOrder = 9)
+    {
+        GameObject circleObject = new GameObject(circleName);
+        circleObject.transform.position = circleCenter;
+
+        SpriteRenderer circleRenderer = circleObject.AddComponent<SpriteRenderer>();
+        circleRenderer.sprite = GetFilledCircleVisualSprite();
+        circleRenderer.color = circleColor;
+        circleRenderer.sortingOrder = sortingOrder;
+
+        float diameter = Mathf.Max(0f, circleRadius) * 2f;
+        circleObject.transform.localScale = new Vector3(diameter, diameter, 1f);
+
+        return circleObject;
+    }
+
+    /// <summary>
+    /// Меняет прозрачность уже созданного предупреждающего круга.
+    /// </summary>
+    protected void SetFilledCircleWithOutlineVisualColors(
+        GameObject circleObject,
+        Color outlineColor,
+        Color fillColor)
+    {
+        if (circleObject == null)
+        {
+            return;
+        }
+
+        SpriteRenderer[] fillRenderers = circleObject.GetComponentsInChildren<SpriteRenderer>();
+        foreach (SpriteRenderer fillRenderer in fillRenderers)
+        {
+            if (fillRenderer != null)
+            {
+                fillRenderer.color = fillColor;
+            }
+        }
+
+        LineRenderer[] outlineRenderers = circleObject.GetComponentsInChildren<LineRenderer>();
+        foreach (LineRenderer outlineRenderer in outlineRenderers)
+        {
+            if (outlineRenderer == null)
+            {
+                continue;
+            }
+
+            outlineRenderer.startColor = outlineColor;
+            outlineRenderer.endColor = outlineColor;
+        }
+    }
+
+    protected Color GetColorWithAlpha(Color sourceColor, float alpha)
+    {
+        sourceColor.a = Mathf.Clamp01(alpha);
+        return sourceColor;
+    }
+
+    /// <summary>
     /// Общий материал для кругов для визуализации
     /// </summary>
     private static Material GetCircleVisualMaterial()
@@ -1735,6 +1839,50 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
 
         circleVisualMaterial = new Material(spriteShader);
         return circleVisualMaterial;
+    }
+
+    /// <summary>
+    /// Создает общий спрайт залитого круга для визуализации областей.
+    /// </summary>
+    private static Sprite GetFilledCircleVisualSprite()
+    {
+        if (filledCircleVisualSprite != null)
+        {
+            return filledCircleVisualSprite;
+        }
+
+        Texture2D texture = new Texture2D(FilledCircleVisualTextureSize, FilledCircleVisualTextureSize, TextureFormat.RGBA32, false)
+        {
+            name = "GeneratedFilledCircleVisual",
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color[] pixels = new Color[FilledCircleVisualTextureSize * FilledCircleVisualTextureSize];
+        float center = (FilledCircleVisualTextureSize - 1) * 0.5f;
+        float radius = center;
+
+        for (int y = 0; y < FilledCircleVisualTextureSize; y++)
+        {
+            for (int x = 0; x < FilledCircleVisualTextureSize; x++)
+            {
+                float distance = Vector2.Distance(new Vector2(x, y), new Vector2(center, center));
+                float alpha = Mathf.Clamp01(radius - distance + 1f);
+                pixels[y * FilledCircleVisualTextureSize + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+
+        filledCircleVisualSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, FilledCircleVisualTextureSize, FilledCircleVisualTextureSize),
+            new Vector2(0.5f, 0.5f),
+            FilledCircleVisualTextureSize);
+
+        filledCircleVisualSprite.name = "GeneratedFilledCircleVisual";
+        return filledCircleVisualSprite;
     }
 
     /// <summary>
@@ -2057,6 +2205,7 @@ public class PlayerCharacterTemplate : MonoBehaviour, IDamageable
         if (characterRigidbody == null)
         {
             characterRigidbody = GetComponent<Rigidbody2D>();
+            Rigidbody2DSmoothingUtility.EnableInterpolation(characterRigidbody);
         }
 
         if (characterRigidbody == null

@@ -25,6 +25,7 @@ public class RangerProjectile : MonoBehaviour
     private void Awake()
     {
         projectileRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(projectileRigidbody);
 
         projectileRigidbody.gravityScale = 0f;
         projectileRigidbody.freezeRotation = true;

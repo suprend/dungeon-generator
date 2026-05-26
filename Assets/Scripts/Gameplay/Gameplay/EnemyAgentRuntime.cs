@@ -30,6 +30,7 @@ public sealed class EnemyAgentRuntime : MonoBehaviour
     {
         navMeshAgent = GetComponent<NavMeshAgent>();
         body2D = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(body2D);
         health = GetComponent<Health>();
 
         if (navMeshAgent != null)

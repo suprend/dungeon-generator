@@ -89,6 +89,7 @@ public class BossTemplate : EnemyTemplate
     private void Start()
     {
         bossRigidbody = GetComponent<Rigidbody2D>();
+        Rigidbody2DSmoothingUtility.EnableInterpolation(bossRigidbody);
         CreateHealthBarVisual();
         UpdateHealthBarVisual();
         wasAlive = IsAlive;
@@ -426,6 +427,7 @@ public class BossTemplate : EnemyTemplate
             if (bossRigidbody == null)
             {
                 bossRigidbody = GetComponent<Rigidbody2D>();
+                Rigidbody2DSmoothingUtility.EnableInterpolation(bossRigidbody);
             }
 
             if (bossRigidbody == null)
@@ -576,6 +578,7 @@ public class BossTemplate : EnemyTemplate
         if (bossRigidbody == null)
         {
             bossRigidbody = GetComponent<Rigidbody2D>();
+            Rigidbody2DSmoothingUtility.EnableInterpolation(bossRigidbody);
         }
 
         if (bossRigidbody == null)
@@ -883,6 +886,7 @@ public class BossTemplate : EnemyTemplate
         if (bossRigidbody == null)
         {
             bossRigidbody = GetComponent<Rigidbody2D>();
+            Rigidbody2DSmoothingUtility.EnableInterpolation(bossRigidbody);
         }
 
         if (bossRigidbody == null)

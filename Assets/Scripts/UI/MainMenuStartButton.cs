@@ -1,4 +1,5 @@
 //DP
+using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -20,6 +21,7 @@ public class MainMenuStartButton : MonoBehaviour
     [Header("Кнопка")]
     [SerializeField] private string buttonText = "Старт";
     [SerializeField] private Vector2 buttonSize = new Vector2(240f, 80f);
+    [SerializeField, Range(0.05f, 0.95f)] private float buttonCenterXRatio = 0.28f;
     [SerializeField] private string exitButtonText = "Выход";
     [SerializeField] private Vector2 exitButtonSize = new Vector2(240f, 60f);
     [SerializeField, Min(0f)] private float exitButtonSpacing = 16f;
@@ -27,8 +29,6 @@ public class MainMenuStartButton : MonoBehaviour
     [Header("Плашка управления")]
     [SerializeField, TextArea(2, 4)] private string controlsDescription =
         "Управление: WASD - движение, ЛКМ - базовая атака, 1/2/3 - способности, Q/E - смена героя, R - поднять союзника";
-    [SerializeField] private Vector2 controlsBoxSize = new Vector2(720f, 70f);
-    [SerializeField, Min(0f)] private float controlsBoxTopOffset = 24f;
 
     [Header("Описания героев")]
     [SerializeField, TextArea(3, 6)] private string warriorDescription =
@@ -39,8 +39,13 @@ public class MainMenuStartButton : MonoBehaviour
         "Маг\n1: цепной снаряд с отскоками.\n2: большой удар по области с оглушением.\n3: проходящий снаряд с периодическим уроном и отталкиванием.";
     [SerializeField, TextArea(3, 6)] private string priestDescription =
         "Жрец\n1: лечит ближайшего к курсору героя после подготовки.\n2: лечит живых героев, дает щит и бонус урона.\n3: мощная ближняя атака.";
-    [SerializeField] private Vector2 descriptionBoxSize = new Vector2(430f, 170f);
-    [SerializeField, Min(0f)] private float descriptionBoxMargin = 30f;
+
+    [Header("Окно обучения")]
+    [SerializeField] private Vector2 tutorialWindowSize = new Vector2(780f, 560f);
+    [SerializeField, Min(8)] private int tutorialWindowFontSize = 18;
+    [SerializeField, Min(0f)] private float tutorialWindowRightOffset = 40f;
+    [SerializeField] private float tutorialWindowVerticalOffset;
+    [SerializeField, Min(0f)] private float layoutPadding = 24f;
 
     /// <summary>
     /// Рисует простое главное меню
@@ -54,8 +59,7 @@ public class MainMenuStartButton : MonoBehaviour
             GUI.skin.font = menuFont;
         }
 
-        DrawControlsDescription();
-        DrawHeroDescriptions();
+        DrawTutorialWindow();
         DrawStartButton();
         DrawExitButton();
 
@@ -73,7 +77,7 @@ public class MainMenuStartButton : MonoBehaviour
         float buttonWidth = Mathf.Max(1f, buttonSize.x);
         float buttonHeight = Mathf.Max(1f, buttonSize.y);
         Rect buttonRect = new Rect(
-            (Screen.width - buttonWidth) * 0.5f,
+            GetButtonX(buttonWidth),
             (Screen.height - buttonHeight) * 0.5f,
             buttonWidth,
             buttonHeight);
@@ -93,7 +97,7 @@ public class MainMenuStartButton : MonoBehaviour
         float buttonY = (Screen.height - startButtonHeight) * 0.5f + startButtonHeight + spacing;
 
         Rect buttonRect = new Rect(
-            (Screen.width - buttonWidth) * 0.5f,
+            GetButtonX(buttonWidth),
             Mathf.Min(buttonY, Screen.height - buttonHeight - 10f),
             buttonWidth,
             buttonHeight);
@@ -104,65 +108,83 @@ public class MainMenuStartButton : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Рисует верхнюю плашку с управлением
-    /// </summary>
-    private void DrawControlsDescription()
-    {
-        GUIStyle controlsStyle = new GUIStyle(GUI.skin.box)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            wordWrap = true,
-            fontSize = Mathf.Max(14, Mathf.RoundToInt(Screen.height / 48f)),
-            padding = new RectOffset(16, 16, 8, 8)
-        };
-
-        float boxWidth = Mathf.Min(Mathf.Max(1f, controlsBoxSize.x), Screen.width - 40f);
-        float boxHeight = Mathf.Max(1f, controlsBoxSize.y);
-        Rect controlsRect = new Rect(
-            (Screen.width - boxWidth) * 0.5f,
-            Mathf.Max(0f, controlsBoxTopOffset),
-            boxWidth,
-            boxHeight);
-
-        GUI.Box(controlsRect, controlsDescription, controlsStyle);
-    }
-
-    /// <summary>
-    /// Рисует четыре текстовых блока с описаниями способностей героев
-    /// </summary>
-    private void DrawHeroDescriptions()
+    private void DrawTutorialWindow()
     {
         GUIStyle descriptionStyle = new GUIStyle(GUI.skin.box)
         {
             alignment = TextAnchor.UpperLeft,
             wordWrap = true,
-            fontSize = Mathf.Max(12, Mathf.RoundToInt(Screen.height / 54f)),
-            padding = new RectOffset(14, 14, 12, 12)
+            fontSize = Mathf.Max(1, tutorialWindowFontSize),
+            padding = new RectOffset(18, 18, 14, 14)
         };
 
-        Vector2 finalBoxSize = new Vector2(
-            Mathf.Min(Mathf.Max(1f, descriptionBoxSize.x), Screen.width * 0.46f),
-            Mathf.Min(Mathf.Max(1f, descriptionBoxSize.y), Screen.height * 0.28f));
-        float margin = Mathf.Max(0f, descriptionBoxMargin);
+        GUI.Box(GetTutorialWindowRect(), BuildTutorialText(), descriptionStyle);
+    }
 
-        GUI.Box(new Rect(margin, margin, finalBoxSize.x, finalBoxSize.y), warriorDescription, descriptionStyle);
-        GUI.Box(
-            new Rect(Screen.width - finalBoxSize.x - margin, margin, finalBoxSize.x, finalBoxSize.y),
-            priestDescription,
-            descriptionStyle);
-        GUI.Box(
-            new Rect(margin, Screen.height - finalBoxSize.y - margin, finalBoxSize.x, finalBoxSize.y),
-            mageDescription,
-            descriptionStyle);
-        GUI.Box(
-            new Rect(
-                Screen.width - finalBoxSize.x - margin,
-                Screen.height - finalBoxSize.y - margin,
-                finalBoxSize.x,
-                finalBoxSize.y),
-            rangerDescription,
-            descriptionStyle);
+    private Rect GetTutorialWindowRect()
+    {
+        float padding = Mathf.Max(0f, layoutPadding);
+        float maxButtonWidth = Mathf.Max(Mathf.Max(1f, buttonSize.x), Mathf.Max(1f, exitButtonSize.x));
+        float minimumX = GetButtonX(maxButtonWidth) + maxButtonWidth + padding;
+        float maxWindowWidth = Screen.width - minimumX - padding;
+
+        if (maxWindowWidth < 280f)
+        {
+            minimumX = padding;
+            maxWindowWidth = Screen.width - padding * 2f;
+        }
+
+        float windowWidth = Mathf.Min(Mathf.Max(1f, tutorialWindowSize.x), Mathf.Max(1f, maxWindowWidth));
+        float windowHeight = Mathf.Min(
+            Mathf.Max(1f, tutorialWindowSize.y),
+            Mathf.Max(1f, Screen.height - padding * 2f));
+        float maxX = Mathf.Max(minimumX, Screen.width - windowWidth - padding);
+        float windowX = Mathf.Clamp(
+            Screen.width - windowWidth - Mathf.Max(0f, tutorialWindowRightOffset),
+            minimumX,
+            maxX);
+        float maxY = Mathf.Max(padding, Screen.height - windowHeight - padding);
+        float windowY = Mathf.Clamp(
+            (Screen.height - windowHeight) * 0.5f + tutorialWindowVerticalOffset,
+            padding,
+            maxY);
+
+        return new Rect(windowX, windowY, windowWidth, windowHeight);
+    }
+
+    private float GetButtonX(float buttonWidth)
+    {
+        float padding = Mathf.Max(0f, layoutPadding);
+        float maxX = Mathf.Max(padding, Screen.width - buttonWidth - padding);
+        float preferredX = Screen.width * Mathf.Clamp01(buttonCenterXRatio) - buttonWidth * 0.5f;
+        return Mathf.Clamp(preferredX, padding, maxX);
+    }
+
+    private string BuildTutorialText()
+    {
+        var builder = new StringBuilder();
+        AppendTutorialSection(builder, controlsDescription);
+        AppendTutorialSection(builder, warriorDescription);
+        AppendTutorialSection(builder, rangerDescription);
+        AppendTutorialSection(builder, mageDescription);
+        AppendTutorialSection(builder, priestDescription);
+        return builder.ToString();
+    }
+
+    private static void AppendTutorialSection(StringBuilder builder, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine();
+        }
+
+        builder.Append(text.Trim());
     }
 
     /// <summary>
